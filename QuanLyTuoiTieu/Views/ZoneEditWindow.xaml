@@ -1,0 +1,43 @@
+﻿<Window x:Class="QuanLyTuoiTieu.Views.ZoneEditWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Khu vực"
+        Width="480" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        Background="#F3F4F6"
+        FontFamily="Segoe UI" FontSize="13">
+
+    <StackPanel>
+        <Border Background="#166534" Padding="20,12">
+            <TextBlock x:Name="HeaderText" Foreground="White" FontSize="18" FontWeight="Bold"/>
+        </Border>
+
+        <StackPanel Margin="20,16,20,8">
+            <TextBlock Text="Mã khu vực" Foreground="#6B7280"/>
+            <ComboBox x:Name="CodeCombo" Margin="0,4,0,0" Padding="6,4"
+                      SelectionChanged="CodeCombo_SelectionChanged"/>
+            <TextBlock x:Name="CodeText" Visibility="Collapsed" FontWeight="Bold" FontSize="15" Margin="0,4,0,0"/>
+            <TextBlock x:Name="CodeHint" Foreground="#6B7280" FontSize="11.5" Margin="0,3,0,0"/>
+
+            <TextBlock Text="Tên khu vực *" Foreground="#6B7280" Margin="0,12,0,0"/>
+            <TextBox x:Name="NameBox" Margin="0,4,0,0" Padding="4,5" MaxLength="100"/>
+
+            <TextBlock Text="Mô tả (không bắt buộc)" Foreground="#6B7280" Margin="0,12,0,0"/>
+            <TextBox x:Name="DescriptionBox" Margin="0,4,0,0" Padding="4,5" Height="70"
+                     AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                     MaxLength="500"/>
+
+            <TextBlock x:Name="ErrorText" Visibility="Collapsed" Foreground="#991B1B"
+                       FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,10,0,0"/>
+        </StackPanel>
+
+        <Border Background="White" BorderBrush="#E5E7EB" BorderThickness="0,1,0,0"
+                Padding="16,10" Margin="0,8,0,0">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="Lưu" IsDefault="True" Width="90" Padding="12,5" Margin="0,0,8,0"
+                        Click="Save_Click"/>
+                <Button Content="Hủy" IsCancel="True" Width="90" Padding="12,5"/>
+            </StackPanel>
+        </Border>
+    </StackPanel>
+</Window>
