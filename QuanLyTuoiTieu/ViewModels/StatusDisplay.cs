@@ -11,7 +11,6 @@ public static class StatusDisplay
         ZoneStatus.Normal => "Bình thường",
         ZoneStatus.Warning => "Cảnh báo",
         ZoneStatus.Disconnected => "Mất kết nối",
-        ZoneStatus.Disabled => "Ngừng hoạt động",
         _ => "Trống"
     };
 
@@ -21,7 +20,6 @@ public static class StatusDisplay
         ZoneStatus.Normal => "✔",
         ZoneStatus.Warning => "⚠",
         ZoneStatus.Disconnected => "✖",
-        ZoneStatus.Disabled => "⊘",
         _ => ""
     };
 

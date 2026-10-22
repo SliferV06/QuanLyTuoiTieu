@@ -6,7 +6,7 @@ using QuanLyTuoiTieu.ViewModels;
 namespace QuanLyTuoiTieu.Services;
 
 /// <summary>
-/// Quản lý ESP32: dựng bảng danh sách, thêm, sửa, ngừng sử dụng.
+/// Quản lý ESP32: dựng bảng danh sách, thêm, sửa, ngừng sử dụng, dùng lại, xóa hẳn.
 /// Các phương thức thao tác trả về null nếu thành công, hoặc câu thông báo lỗi tiếng Việt.
 /// </summary>
 public class NodeManagementService
@@ -55,6 +55,12 @@ public class NodeManagementService
                     }
                 }
 
+                string lastDataText = !n.IsActive
+                    ? "— (ngừng sử dụng)"
+                    : mine.Count == 0
+                        ? "— (chưa có cảm biến)"
+                        : BuildLastDataText(lastMeasuredAt, nowUtc);
+
                 return new NodeRow
                 {
                     Id = n.Id,
@@ -64,9 +70,7 @@ public class NodeManagementService
                     ZoneCount = zoneCodes.Count,
                     SensorCount = mine.Count,
                     ZonesText = zoneCodes.Count == 0 ? "—" : string.Join(", ", zoneCodes),
-                    LastDataText = mine.Count == 0
-                        ? "— (chưa có cảm biến)"
-                        : BuildLastDataText(lastMeasuredAt, nowUtc),
+                    LastDataText = lastDataText,
                     CreatedAtText = n.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy", CultureInfo.InvariantCulture),
                     NotesText = n.Notes ?? ""
                 };
@@ -74,13 +78,16 @@ public class NodeManagementService
             .ToList();
     }
 
+    /// <summary>Cảm biến đang quản lý của ESP32, kèm các cảm biến đã gỡ cùng khi ESP32 ngừng sử dụng.</summary>
     public List<NodeSensorRow> BuildSensorRows(string nodeId)
     {
         var typeById = _dataSource.GetSensorTypes().ToDictionary(t => t.Id);
 
         return _dataSource.GetSensors()
-            .Where(s => s.NodeId == nodeId && s.Status != SensorStatus.Removed)
-            .OrderBy(s => s.ZoneCode)
+            .Where(s => s.NodeId == nodeId
+                        && (s.Status != SensorStatus.Removed || s.RemovedWithNodeId == nodeId))
+            .OrderBy(s => s.Status == SensorStatus.Removed)   // đang quản lý trước, đã gỡ sau
+            .ThenBy(s => s.ZoneCode)
             .ThenBy(s => s.Id)
             .Select(s => new NodeSensorRow
             {
@@ -90,7 +97,10 @@ public class NodeManagementService
                 TypeName = typeById.TryGetValue(s.SensorTypeId, out SensorType? type)
                     ? type.Name
                     : $"{s.SensorTypeId} (chưa khai báo)",
-                StatusText = StatusDisplay.SensorStatusText(s.Status)
+                StatusText = s.Status == SensorStatus.Removed
+                    ? "Đã gỡ cùng ESP32"
+                    : StatusDisplay.SensorStatusText(s.Status),
+                IsRemoved = s.Status == SensorStatus.Removed
             })
             .ToList();
     }
@@ -185,37 +195,131 @@ public class NodeManagementService
 
     // ===== Ngừng sử dụng / dùng lại =====
 
-    /// <summary>Trả về lý do KHÔNG được ngừng sử dụng ESP32, hoặc null nếu được phép.</summary>
-    public string? CanDisable(string nodeId)
+    /// <summary>Số cảm biến đang quản lý và các khu vực chứa chúng (để cảnh báo trước khi ngừng sử dụng).</summary>
+    public (int SensorCount, List<string> ZoneCodes) GetDisableImpact(string nodeId)
     {
-        int count = _dataSource.GetSensors()
-            .Count(s => s.NodeId == nodeId && s.Status != SensorStatus.Removed);
+        var active = _dataSource.GetSensors()
+            .Where(s => s.NodeId == nodeId && s.Status != SensorStatus.Removed)
+            .ToList();
 
-        return count > 0
-            ? $"{nodeId} còn {count} cảm biến đang quản lý. " +
-              "Hãy chuyển các cảm biến sang ESP32 khác (Sửa cảm biến) hoặc gỡ chúng trước khi ngừng sử dụng ESP32."
-            : null;
+        return (active.Count, active.Select(s => s.ZoneCode).Distinct().OrderBy(c => c).ToList());
     }
 
+    /// <summary>Số cảm biến đã gỡ cùng ESP32 (sẽ được khôi phục khi dùng lại ESP32).</summary>
+    public int CountSensorsToRestore(string nodeId) =>
+        _dataSource.GetSensors().Count(s =>
+            s.NodeId == nodeId && s.Status == SensorStatus.Removed && s.RemovedWithNodeId == nodeId);
+
+    /// <summary>
+    /// isActive = false: ngừng sử dụng ESP32, đồng thời gỡ mọi cảm biến đang quản lý của nó.
+    /// isActive = true: dùng lại ESP32, đồng thời khôi phục các cảm biến đã gỡ cùng lúc ngừng sử dụng.
+    /// </summary>
     public string? SetActive(string id, bool isActive)
     {
         Esp32Node? existing = _dataSource.GetNodes().FirstOrDefault(n => n.Id == id);
         if (existing == null) return $"Không tìm thấy ESP32 {id}.";
+        if (existing.IsActive == isActive) return null;
 
-        if (!isActive)
+        try
         {
-            string? blocked = CanDisable(id);
-            if (blocked != null) return blocked;
+            if (!isActive)
+            {
+                // Ngừng sử dụng: gỡ cùng mọi cảm biến đang quản lý (ghi nhớ để khôi phục khi dùng lại)
+                DateTime now = DateTime.UtcNow;
+                foreach (Sensor sensor in _dataSource.GetSensors()
+                             .Where(s => s.NodeId == id && s.Status != SensorStatus.Removed)
+                             .ToList())
+                {
+                    _dataSource.RemoveSensor(sensor.Id, now, null, id);
+                }
+
+                return Save(new Esp32Node
+                {
+                    Id = id,
+                    Name = existing.Name,
+                    Notes = existing.Notes,
+                    IsActive = false,
+                    CreatedAt = existing.CreatedAt
+                });
+            }
+
+            // Dùng lại: bật ESP32 trước, rồi khôi phục các cảm biến đã gỡ cùng
+            string? error = Save(new Esp32Node
+            {
+                Id = id,
+                Name = existing.Name,
+                Notes = existing.Notes,
+                IsActive = true,
+                CreatedAt = existing.CreatedAt
+            });
+            if (error != null) return error;
+
+            string today = DateTime.Now.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+            foreach (Sensor sensor in _dataSource.GetSensors()
+                         .Where(s => s.NodeId == id
+                                     && s.Status == SensorStatus.Removed
+                                     && s.RemovedWithNodeId == id)
+                         .ToList())
+            {
+                _dataSource.RestoreSensor(sensor.Id, $"Đã khôi phục ngày {today} cùng với việc dùng lại ESP32 {id}");
+            }
+
+            return null;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ex.Message;
+        }
+    }
+
+    // ===== Xóa hẳn ESP32 =====
+
+    /// <summary>Số cảm biến ĐÃ GỠ còn gắn với ESP32 (sẽ bị xóa hẳn cùng ESP32).</summary>
+    public int CountRemovedSensors(string nodeId) =>
+        _dataSource.GetSensors().Count(s => s.NodeId == nodeId && s.Status == SensorStatus.Removed);
+
+    /// <summary>Trả về lý do KHÔNG được xóa hẳn ESP32, hoặc null nếu được phép.</summary>
+    public string? CanDelete(string nodeId)
+    {
+        Esp32Node? node = _dataSource.GetNodes().FirstOrDefault(n => n.Id == nodeId);
+        if (node == null) return $"Không tìm thấy ESP32 {nodeId}.";
+        if (node.IsActive)
+            return $"{nodeId} đang hoạt động. Hãy ngừng sử dụng ESP32 trước khi xóa hẳn.";
+
+        int active = _dataSource.GetSensors()
+            .Count(s => s.NodeId == nodeId && s.Status != SensorStatus.Removed);
+        if (active > 0)
+        {
+            return $"{nodeId} còn {active} cảm biến đang quản lý. " +
+                   "Hãy chuyển chúng sang ESP32 khác hoặc gỡ chúng trước khi xóa hẳn ESP32.";
         }
 
-        return Save(new Esp32Node
+        return null;
+    }
+
+    /// <summary>
+    /// Xóa hẳn ESP32 đã ngừng sử dụng. Các cảm biến ĐÃ GỠ còn gắn với ESP32 này cũng bị xóa hẳn.
+    /// Không hoàn tác được. Mã ESP32 sau đó dùng lại được.
+    /// </summary>
+    public string? DeleteNode(string nodeId)
+    {
+        string? blocked = CanDelete(nodeId);
+        if (blocked != null) return blocked;
+
+        try
         {
-            Id = id,
-            Name = existing.Name,
-            Notes = existing.Notes,
-            IsActive = isActive,
-            CreatedAt = existing.CreatedAt
-        });
+            foreach (Sensor sensor in _dataSource.GetSensors().Where(s => s.NodeId == nodeId).ToList())
+            {
+                _dataSource.DeleteSensor(sensor.Id);
+            }
+
+            _dataSource.DeleteNode(nodeId);
+            return null;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ex.Message;
+        }
     }
 
     // ===== Dùng chung =====

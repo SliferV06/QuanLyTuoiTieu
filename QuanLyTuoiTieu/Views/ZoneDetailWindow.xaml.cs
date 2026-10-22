@@ -14,7 +14,7 @@ public partial class ZoneDetailWindow : Window
     private readonly string _zoneCode;
     private ZoneDetail _detail = null!;
 
-    /// <summary>true nếu người dùng đã sửa hoặc ngừng/dùng lại khu vực (để cửa sổ chính tải lại sơ đồ).</summary>
+    /// <summary>true nếu dữ liệu đã thay đổi (để cửa sổ chính tải lại sơ đồ và thống kê).</summary>
     public bool DataChanged { get; private set; }
 
     public ZoneDetailWindow(IFarmDataSource dataSource, string zoneCode)
@@ -27,7 +27,7 @@ public partial class ZoneDetailWindow : Window
         Title = $"Chi tiết khu vực {zoneCode}";
         FooterNote.Text =
             $"Dữ liệu được coi là cũ sau {FarmOverviewService.StaleAfter.TotalMinutes:0} phút. " +
-             "Cảm biến đã gỡ chỉ bị đánh dấu, lịch sử vẫn được giữ lại.";
+            "Cảm biến đã gỡ vẫn được giữ lại cho tới khi bạn xóa hẳn.";
 
         ReloadDetail();
     }
@@ -52,15 +52,6 @@ public partial class ZoneDetailWindow : Window
 
         NoSensorText.Visibility = detail.ActiveRows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        ToggleActiveButton.Content = detail.Status == ZoneStatus.Disabled
-            ? "Dùng lại khu vực"
-            : "Ngừng sử dụng khu vực";
-
-        AddSensorButton.IsEnabled = detail.Status != ZoneStatus.Disabled;
-        AddSensorButton.ToolTip = detail.Status == ZoneStatus.Disabled
-            ? "Khu vực đang ngừng sử dụng. Hãy dùng lại khu vực trước khi thêm cảm biến."
-            : null;
-
         UpdateSensorList();
     }
 
@@ -80,6 +71,8 @@ public partial class ZoneDetailWindow : Window
         UpdateSensorList();
     }
 
+    // ===== Khu vực =====
+
     private void EditZone_Click(object sender, RoutedEventArgs e)
     {
         Zone? zone = _dataSource.GetZones().FirstOrDefault(z => z.Code == _zoneCode);
@@ -93,40 +86,47 @@ public partial class ZoneDetailWindow : Window
         }
     }
 
-    private void ToggleActive_Click(object sender, RoutedEventArgs e)
+    private void DeleteZone_Click(object sender, RoutedEventArgs e)
     {
-        bool disabling = _detail.Status != ZoneStatus.Disabled;
+        var service = new ZoneManagementService(_dataSource);
+        var (active, removed) = service.CountSensors(_zoneCode);
 
-        if (disabling)
-        {
-            MessageBoxResult answer = MessageBox.Show(
-                $"Ngừng sử dụng khu vực {_zoneCode}?\n\n" +
-                "Khu vực sẽ chuyển sang trạng thái \"Ngừng hoạt động\". " +
-                "Cảm biến và lịch sử đo vẫn được giữ nguyên, có thể dùng lại bất cứ lúc nào.",
-                "Xác nhận", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        string sensorLine = active + removed == 0
+            ? "Khu vực này chưa có cảm biến."
+            : $"Toàn bộ {active + removed} cảm biến của khu vực ({active} đang quản lý, {removed} đã gỡ) " +
+              "cũng sẽ bị xóa hẳn cùng giá trị đo.";
 
-            if (answer != MessageBoxResult.Yes) return;
-        }
+        MessageBoxResult answer = MessageBox.Show(
+            $"Xóa khu vực {_zoneCode}?\n\n" +
+            $"{sensorLine}\n\n" +
+            $"Ô {_zoneCode} sẽ trở thành ô trống. Không thể hoàn tác.\n" +
+            "Thao tác này KHÔNG tháo cảm biến vật lý ngoài thực địa.",
+            "Xác nhận xóa khu vực", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes) return;
 
-        string? error = new ZoneManagementService(_dataSource).SetActive(_zoneCode, isActive: !disabling);
+        string? error = service.DeleteZone(_zoneCode);
         if (error != null)
         {
-            MessageBox.Show(error, "Lỗi", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(error, "Không thể xóa khu vực", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
         DataChanged = true;
-        ReloadDetail();
+        Close();   // khu vực không còn nữa, đóng cửa sổ chi tiết
     }
+
+    // ===== Cảm biến =====
+
     private void AddSensor_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new SensorEditWindow(new SensorManagementService(_dataSource), _zoneCode) { Owner = this };
         if (dialog.ShowDialog() == true)
         {
-            DataChanged = true;   // để cửa sổ chính cập nhật thống kê khi đóng
+            DataChanged = true;
             ReloadDetail();
         }
     }
+
     private void SensorGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         UpdateSensorButtons();
@@ -134,7 +134,7 @@ public partial class ZoneDetailWindow : Window
 
     /// <summary>
     /// Sửa, thay thế, gỡ dùng được khi đang chọn một cảm biến CHƯA gỡ.
-    /// Khôi phục dùng được khi đang chọn một cảm biến ĐÃ gỡ.
+    /// Khôi phục và xóa cảm biến dùng được khi đang chọn một cảm biến ĐÃ gỡ.
     /// Dòng gợi ý cạnh tiêu đề cho biết đang chọn gì.
     /// </summary>
     private void UpdateSensorButtons()
@@ -147,11 +147,12 @@ public partial class ZoneDetailWindow : Window
         ReplaceSensorButton.IsEnabled = isActiveRow;
         RemoveSensorButton.IsEnabled = isActiveRow;
         RestoreSensorButton.IsEnabled = isRemovedRow;
+        DeleteSensorButton.IsEnabled = isRemovedRow;
 
         SelectionHintRun.Text = row == null
             ? "  -  chọn một dòng để thao tác"
             : isRemovedRow
-                ? $"  -  đã chọn {row.Id} (đã gỡ, chỉ có thể khôi phục)"
+                ? $"  -  đã chọn {row.Id} (đã gỡ: có thể khôi phục hoặc xóa hẳn)"
                 : $"  -  đã chọn {row.Id}";
     }
 
@@ -162,6 +163,15 @@ public partial class ZoneDetailWindow : Window
 
         Sensor? sensor = _dataSource.GetSensors().FirstOrDefault(s => s.Id == row.Id);
         return sensor is { Status: not SensorStatus.Removed } ? sensor : null;
+    }
+
+    /// <summary>Cảm biến ĐÃ gỡ đang được chọn trong bảng, hoặc null.</summary>
+    private Sensor? GetSelectedRemovedSensor()
+    {
+        if (SensorGrid.SelectedItem is not SensorRow { IsRemoved: true } row) return null;
+
+        Sensor? sensor = _dataSource.GetSensors().FirstOrDefault(s => s.Id == row.Id);
+        return sensor is { Status: SensorStatus.Removed } ? sensor : null;
     }
 
     private void SensorGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
@@ -199,10 +209,28 @@ public partial class ZoneDetailWindow : Window
         };
         if (dialog.ShowDialog() == true)
         {
-            DataChanged = true;   // để cửa sổ chính cập nhật thống kê khi đóng
+            DataChanged = true;
             ReloadDetail();
         }
     }
+
+    private void ReplaceSensor_Click(object sender, RoutedEventArgs e)
+    {
+        Sensor? sensor = GetSelectedActiveSensor();
+        if (sensor == null) return;
+
+        var dialog = new SensorEditWindow(
+            new SensorManagementService(_dataSource), sensor.ZoneCode, replacingSensor: sensor)
+        {
+            Owner = this
+        };
+        if (dialog.ShowDialog() == true)
+        {
+            DataChanged = true;
+            ReloadDetail();
+        }
+    }
+
     private void RemoveSensor_Click(object sender, RoutedEventArgs e)
     {
         Sensor? sensor = GetSelectedActiveSensor();
@@ -211,7 +239,7 @@ public partial class ZoneDetailWindow : Window
         MessageBoxResult answer = MessageBox.Show(
             $"Gỡ cảm biến {sensor.Id} ({sensor.Name})?\n\n" +
             "Cảm biến sẽ được đánh dấu \"Đã gỡ\" trong phần mềm: không còn tính vào thống kê và trạng thái khu vực. " +
-            "Thông tin và lịch sử đo vẫn được giữ lại, và có thể khôi phục sau.\n\n" +
+            "Thông tin và lịch sử đo vẫn được giữ lại, có thể khôi phục hoặc xóa hẳn sau.\n\n" +
             "Thao tác này KHÔNG tháo cảm biến vật lý ngoài thực địa.",
             "Xác nhận gỡ cảm biến", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
         if (answer != MessageBoxResult.Yes) return;
@@ -223,17 +251,8 @@ public partial class ZoneDetailWindow : Window
             return;
         }
 
-        DataChanged = true;   // để cửa sổ chính cập nhật thống kê khi đóng
+        DataChanged = true;
         ReloadDetail();
-    }
-
-    /// <summary>Cảm biến ĐÃ gỡ đang được chọn trong bảng, hoặc null.</summary>
-    private Sensor? GetSelectedRemovedSensor()
-    {
-        if (SensorGrid.SelectedItem is not SensorRow { IsRemoved: true } row) return null;
-
-        Sensor? sensor = _dataSource.GetSensors().FirstOrDefault(s => s.Id == row.Id);
-        return sensor is { Status: SensorStatus.Removed } ? sensor : null;
     }
 
     private void RestoreSensor_Click(object sender, RoutedEventArgs e)
@@ -267,22 +286,32 @@ public partial class ZoneDetailWindow : Window
         ReloadDetail();
     }
 
-    private void ReplaceSensor_Click(object sender, RoutedEventArgs e)
+    private void DeleteSensor_Click(object sender, RoutedEventArgs e)
     {
-        Sensor? sensor = GetSelectedActiveSensor();
+        Sensor? sensor = GetSelectedRemovedSensor();
         if (sensor == null) return;
 
-        var dialog = new SensorEditWindow(
-            new SensorManagementService(_dataSource), sensor.ZoneCode, replacingSensor: sensor)
+        MessageBoxResult answer = MessageBox.Show(
+            $"Xóa hẳn cảm biến {sensor.Id} ({sensor.Name})?\n\n" +
+            "Thông tin và giá trị đo của cảm biến sẽ bị xóa vĩnh viễn, không thể khôi phục. " +
+            "Mã cảm biến sau đó có thể dùng lại.\n\n" +
+            "Thao tác này KHÔNG tháo cảm biến vật lý ngoài thực địa.",
+            "Xác nhận xóa hẳn cảm biến", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes) return;
+
+        string? error = new SensorManagementService(_dataSource).DeleteSensor(sensor.Id);
+        if (error != null)
         {
-            Owner = this
-        };
-        if (dialog.ShowDialog() == true)
-        {
-            DataChanged = true;
-            ReloadDetail();
+            MessageBox.Show(error, "Không thể xóa", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
         }
+
+        DataChanged = true;
+        ReloadDetail();
     }
+
+    // ===== Đóng cửa sổ =====
+
     private void Close_Click(object sender, RoutedEventArgs e)
     {
         Close();

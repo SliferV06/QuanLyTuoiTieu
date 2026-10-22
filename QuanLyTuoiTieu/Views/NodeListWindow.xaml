@@ -71,6 +71,10 @@
                     IsEnabled="False" Click="EditNode_Click"/>
             <Button x:Name="ToggleNodeButton" Content="Ngừng sử dụng ESP32" Padding="12,4" Margin="0,2,8,2"
                     MinWidth="150" IsEnabled="False" Click="ToggleNode_Click"/>
+            <Button x:Name="DeleteNodeButton" Content="Xóa ESP32" Padding="12,4" Margin="0,2,8,2"
+                    IsEnabled="False" Click="DeleteNode_Click"
+                    ToolTipService.ShowOnDisabled="True"
+                    ToolTip="Chọn một ESP32 đã ngừng sử dụng rồi nhấn để xóa hẳn khỏi dữ liệu"/>
             <TextBlock x:Name="SummaryText" Foreground="#6B7280" VerticalAlignment="Center" Margin="16,2,0,2"/>
         </WrapPanel>
 

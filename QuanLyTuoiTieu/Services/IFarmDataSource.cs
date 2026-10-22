@@ -32,38 +32,53 @@ public interface IFarmDataSource
     /// </summary>
     Task RefreshAsync(CancellationToken cancellationToken);
 
-    /// <summary>Thêm khu vực mới. Ném InvalidOperationException nếu mã trùng hoặc đã đủ 144.</summary>
+    // ===== Khu vực =====
+
+    /// <summary>Thêm khu vực mới. Ném InvalidOperationException nếu mã trùng hoặc đã đủ số khu vực tối đa.</summary>
     void AddZone(Zone zone);
 
-    /// <summary>Cập nhật tên, mô tả, trạng thái sử dụng của khu vực có cùng mã.</summary>
+    /// <summary>Cập nhật tên, mô tả của khu vực có cùng mã.</summary>
     void UpdateZone(Zone zone);
+
+    /// <summary>
+    /// Xóa khu vực (ô trở thành trống). Ném InvalidOperationException nếu không tìm thấy
+    /// hoặc khu vực còn cảm biến (phải xóa cảm biến trước).
+    /// </summary>
+    void DeleteZone(string zoneCode);
+
+    // ===== Cảm biến =====
 
     /// <summary>Thêm cảm biến mới. Ném InvalidOperationException nếu mã cảm biến đã tồn tại.</summary>
     void AddSensor(Sensor sensor);
 
-    /// <summary>
-    /// Cập nhật tên, loại, khu vực, ESP32, đơn vị, trạng thái, ghi chú của cảm biến có cùng mã.
-    /// Ném InvalidOperationException nếu không tìm thấy cảm biến.
-    /// </summary>
+    /// <summary>Cập nhật tên, loại, khu vực, ESP32, đơn vị, trạng thái, ghi chú của cảm biến có cùng mã.</summary>
     void UpdateSensor(Sensor sensor);
 
     /// <summary>
-    /// Đánh dấu cảm biến là đã gỡ (KHÔNG xóa dữ liệu, giữ lịch sử).
+    /// Đánh dấu cảm biến là đã gỡ (chưa xóa dữ liệu).
     /// replacedBySensorId: mã cảm biến thay thế (nếu có).
-    /// Ném InvalidOperationException nếu không tìm thấy hoặc đã gỡ trước đó.
+    /// removedWithNodeId: mã ESP32 nếu cảm biến bị gỡ cùng lúc ESP32 ngừng sử dụng (để khôi phục khi dùng lại).
     /// </summary>
-    void RemoveSensor(string sensorId, DateTime removedAtUtc, string? replacedBySensorId);
+    void RemoveSensor(string sensorId, DateTime removedAtUtc, string? replacedBySensorId,
+                      string? removedWithNodeId = null);
 
-    /// <summary>
-    /// Khôi phục cảm biến đã gỡ: đặt lại "Đang hoạt động", xóa thông tin gỡ,
-    /// và ghi historyNote vào ghi chú để giữ dấu vết.
-    /// Ném InvalidOperationException nếu không tìm thấy hoặc cảm biến chưa bị gỡ.
-    /// </summary>
+    /// <summary>Khôi phục cảm biến đã gỡ, ghi historyNote vào ghi chú để giữ dấu vết.</summary>
     void RestoreSensor(string sensorId, string historyNote);
+
+    /// <summary>Xóa HẲN cảm biến cùng giá trị đo của nó (không khôi phục được).</summary>
+    void DeleteSensor(string sensorId);
+
+    // ===== ESP32 =====
 
     /// <summary>Thêm ESP32 mới. Ném InvalidOperationException nếu mã đã tồn tại.</summary>
     void AddNode(Esp32Node node);
 
     /// <summary>Cập nhật tên, ghi chú, trạng thái sử dụng của ESP32 có cùng mã.</summary>
     void UpdateNode(Esp32Node node);
+
+    /// <summary>
+    /// Xóa HẲN ESP32. Ném InvalidOperationException nếu không tìm thấy
+    /// hoặc ESP32 còn cảm biến gắn với nó (phải xóa cảm biến trước).
+    /// </summary>
+    void DeleteNode(string nodeId);
 }

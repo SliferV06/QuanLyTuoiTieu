@@ -3,8 +3,8 @@
 namespace QuanLyTuoiTieu.Services;
 
 /// <summary>
-/// Thêm, sửa, ngừng sử dụng khu vực. Kiểm tra dữ liệu đầu vào trước khi ghi.
-/// Các phương thức trả về null nếu thành công, hoặc câu thông báo lỗi tiếng Việt.
+/// Thêm, sửa, xóa khu vực. Kiểm tra dữ liệu đầu vào trước khi ghi.
+/// Các phương thức thao tác trả về null nếu thành công, hoặc câu thông báo lỗi tiếng Việt.
 /// </summary>
 public class ZoneManagementService
 {
@@ -18,7 +18,7 @@ public class ZoneManagementService
         _dataSource = dataSource;
     }
 
-    /// <summary>Danh sách mã ô còn trống trong sơ đồ 12 x 12 (A01 ... L12).</summary>
+    /// <summary>Danh sách mã ô còn trống trong sơ đồ (A01 ... M12).</summary>
     public List<string> GetFreeCodes()
     {
         var used = _dataSource.GetZones().Select(z => z.Code).ToHashSet();
@@ -35,7 +35,7 @@ public class ZoneManagementService
         return free;
     }
 
-    /// <summary>Mã hợp lệ: chữ cái A-L và số 01-12, ví dụ A01, B07, L12.</summary>
+    /// <summary>Mã hợp lệ: chữ cái A-M và số 01-12, ví dụ A01, B07, M12.</summary>
     public static bool IsValidCode(string code)
     {
         if (code.Length != 3) return false;
@@ -67,8 +67,7 @@ public class ZoneManagementService
                 Row = code[0] - 'A' + 1,
                 Column = int.Parse(code.Substring(1)),
                 Name = name!.Trim(),
-                Description = CleanDescription(description),
-                IsActive = true
+                Description = CleanDescription(description)
             });
             return null;
         }
@@ -86,35 +85,50 @@ public class ZoneManagementService
         string? error = ValidateText(name, description);
         if (error != null) return error;
 
-        return Save(new Zone
-        {
-            Code = code,
-            Name = name!.Trim(),
-            Description = CleanDescription(description),
-            IsActive = existing.IsActive
-        });
-    }
-
-    /// <summary>isActive = false: ngừng sử dụng khu vực. true: dùng lại. Không xóa dữ liệu.</summary>
-    public string? SetActive(string code, bool isActive)
-    {
-        Zone? existing = _dataSource.GetZones().FirstOrDefault(z => z.Code == code);
-        if (existing == null) return $"Không tìm thấy khu vực {code}.";
-
-        return Save(new Zone
-        {
-            Code = code,
-            Name = existing.Name,
-            Description = existing.Description,
-            IsActive = isActive
-        });
-    }
-
-    private string? Save(Zone zone)
-    {
         try
         {
-            _dataSource.UpdateZone(zone);
+            _dataSource.UpdateZone(new Zone
+            {
+                Code = code,
+                Name = name!.Trim(),
+                Description = CleanDescription(description)
+            });
+            return null;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ex.Message;
+        }
+    }
+
+    // ===== Xóa khu vực =====
+
+    /// <summary>Số cảm biến của khu vực: đang quản lý và đã gỡ (cả hai đều bị xóa cùng khu vực).</summary>
+    public (int Active, int Removed) CountSensors(string zoneCode)
+    {
+        var inZone = _dataSource.GetSensors().Where(s => s.ZoneCode == zoneCode).ToList();
+        return (inZone.Count(s => s.Status != SensorStatus.Removed),
+                inZone.Count(s => s.Status == SensorStatus.Removed));
+    }
+
+    /// <summary>
+    /// Xóa khu vực: ô trở thành trống. Mọi cảm biến của khu vực (đang quản lý và đã gỡ)
+    /// bị xóa hẳn cùng giá trị đo. Không hoàn tác được.
+    /// </summary>
+    public string? DeleteZone(string zoneCode)
+    {
+        Zone? existing = _dataSource.GetZones().FirstOrDefault(z => z.Code == zoneCode);
+        if (existing == null) return $"Không tìm thấy khu vực {zoneCode}.";
+
+        try
+        {
+            // ToList() để không sửa danh sách khi đang duyệt
+            foreach (Sensor sensor in _dataSource.GetSensors().Where(s => s.ZoneCode == zoneCode).ToList())
+            {
+                _dataSource.DeleteSensor(sensor.Id);
+            }
+
+            _dataSource.DeleteZone(zoneCode);
             return null;
         }
         catch (InvalidOperationException ex)

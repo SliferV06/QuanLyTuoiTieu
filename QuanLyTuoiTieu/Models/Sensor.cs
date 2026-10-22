@@ -35,4 +35,10 @@ public class Sensor
 
     /// <summary>Nếu được thay thế, mã của cảm biến thay thế.</summary>
     public string? ReplacedBySensorId { get; set; }
+
+    /// <summary>
+    /// Nếu cảm biến bị gỡ cùng lúc khi ESP32 ngừng sử dụng: mã ESP32 đó.
+    /// Dùng để tự khôi phục đúng các cảm biến này khi dùng lại ESP32. null = gỡ riêng lẻ.
+    /// </summary>
+    public string? RemovedWithNodeId { get; set; }
 }

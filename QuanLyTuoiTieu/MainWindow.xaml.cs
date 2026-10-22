@@ -1,8 +1,11 @@
 ﻿using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using QuanLyTuoiTieu.Data;
+using QuanLyTuoiTieu.Models;
 using QuanLyTuoiTieu.Services;
 using QuanLyTuoiTieu.ViewModels;
 using QuanLyTuoiTieu.Views;
@@ -13,6 +16,12 @@ public partial class MainWindow : Window
 {
     /// <summary>Cứ mỗi khoảng này, tính lại trạng thái khu vực theo giờ hiện tại (dữ liệu "già" đi theo thời gian).</summary>
     private static readonly TimeSpan StatusRecalcInterval = TimeSpan.FromSeconds(30);
+
+    /// <summary>Chiều cao một hàng ô: ô cao 60 + lề 3 phía trên + 3 phía dưới (khớp ZoneCellStyle và Height="60" trong XAML).</summary>
+    private const double MatrixRowPitch = 66;
+
+    /// <summary>Số hàng tối thiểu luôn hiển thị, kể cả khi cửa sổ rất thấp.</summary>
+    private const int MinVisibleRows = 3;
 
     private static readonly Brush NormalStatusBrush = new SolidColorBrush(Color.FromRgb(0x6B, 0x72, 0x80));
     private static readonly Brush FailedStatusBrush = new SolidColorBrush(Color.FromRgb(0x99, 0x1B, 0x1B));
@@ -27,6 +36,7 @@ public partial class MainWindow : Window
 
     private List<ZoneCell> _cells = new();
     private bool _isReady;                       // tránh xử lý sự kiện khi cửa sổ đang khởi tạo
+    private double _wheelRemainder;              // gom các nấc lăn chuột nhỏ (bàn di chuột) thành từng hàng
 
     public MainWindow()
     {
@@ -38,14 +48,15 @@ public partial class MainWindow : Window
         _syncService.StateChanged += (_, _) => UpdateSyncUi();
         _syncService.SyncCompleted += OnSyncCompleted;
 
-        // Nhãn, dòng nguồn dữ liệu và công cụ thử nghiệm do nguồn dữ liệu quyết định
+        // Nhãn, nguồn dữ liệu và menu thử nghiệm do nguồn dữ liệu quyết định
         SimulatedBadge.Visibility = _syncService.IsSimulated ? Visibility.Visible : Visibility.Collapsed;
-        SimulationPanel.Visibility = _simulation != null ? Visibility.Visible : Visibility.Collapsed;
+        TestMenuButton.Visibility = _simulation != null ? Visibility.Visible : Visibility.Collapsed;
         SourceText.Text = _syncService.IsSimulated
-            ? $"Nguồn dữ liệu: {_syncService.SourceName.ToLowerInvariant()} (chưa kết nối máy chủ)"
-            : $"Nguồn dữ liệu: {_syncService.SourceName}";
+            ? "Nguồn: dữ liệu mô phỏng"
+            : $"Nguồn: {_syncService.SourceName}";
+        SourceText.ToolTip = _syncService.IsSimulated ? "Dữ liệu mô phỏng, chưa kết nối máy chủ" : null;
         AutoSyncCheck.Content =
-            $"Tự động đồng bộ mỗi {(int)SyncService.DefaultAutoSyncInterval.TotalMinutes} phút";
+            $"Tự đồng bộ mỗi {(int)SyncService.DefaultAutoSyncInterval.TotalMinutes} phút";
 
         // Tính lại trạng thái khu vực theo thời gian
         _statusTimer = new DispatcherTimer { Interval = StatusRecalcInterval };
@@ -56,12 +67,70 @@ public partial class MainWindow : Window
         _syncService.SetAutoSyncEnabled(AutoSyncCheck.IsChecked == true);  // bật hẹn giờ theo ô tích
         _isReady = true;
 
+        Loaded += (_, _) => UpdateMatrixHeight();                          // đặt số hàng ma trận nguyên hàng
         Loaded += async (_, _) => await _syncService.SyncAsync();          // tải dữ liệu khi khởi động
         Closed += (_, _) =>
         {
             _statusTimer.Stop();
             _syncService.Shutdown();                                       // dừng hẹn giờ, hủy đồng bộ đang chạy
         };
+    }
+
+    // ===== Kích thước ma trận: luôn hiển thị số NGUYÊN hàng =====
+
+    private void MatrixHost_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        UpdateMatrixHeight();
+    }
+
+    /// <summary>
+    /// Tính số hàng vừa với chiều cao còn lại (chiều cao vùng chứa trừ phần tiêu đề, thanh công cụ của khung),
+    /// rồi đặt chiều cao ma trận đúng bằng số hàng x 66 px. Nhờ đó không bao giờ thấy nửa hàng.
+    /// </summary>
+    private void UpdateMatrixHeight()
+    {
+        if (MatrixHost.ActualHeight <= 0 || MatrixFrame.ActualHeight <= 0) return;
+
+        // Phần của khung không phải ma trận (tiêu đề sơ đồ, thanh công cụ, viền, đệm)
+        double chrome = MatrixFrame.ActualHeight - ZoneMatrix.ActualHeight;
+        double available = MatrixHost.ActualHeight - chrome;
+
+        int rows = (int)Math.Floor((available + 0.5) / MatrixRowPitch);
+        rows = Math.Clamp(rows, MinVisibleRows, Zone.MaxRows);
+
+        double target = rows * MatrixRowPitch;
+        if (double.IsNaN(ZoneMatrix.Height) || Math.Abs(ZoneMatrix.Height - target) > 0.5)
+        {
+            ZoneMatrix.Height = target;
+        }
+    }
+
+    /// <summary>ScrollViewer nằm trong khuôn mẫu của ma trận (tên MatrixScroll).</summary>
+    private ScrollViewer? GetMatrixScrollViewer()
+    {
+        ZoneMatrix.ApplyTemplate();
+        return ZoneMatrix.Template.FindName("MatrixScroll", ZoneMatrix) as ScrollViewer;
+    }
+
+    /// <summary>Mỗi nấc lăn chuột dịch đúng một hàng.</summary>
+    private void ZoneMatrix_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        ScrollViewer? scroll = GetMatrixScrollViewer();
+        if (scroll == null) return;
+
+        _wheelRemainder += e.Delta;
+        while (_wheelRemainder >= 120)
+        {
+            scroll.LineUp();
+            _wheelRemainder -= 120;
+        }
+        while (_wheelRemainder <= -120)
+        {
+            scroll.LineDown();
+            _wheelRemainder += 120;
+        }
+
+        e.Handled = true;
     }
 
     // ===== Dựng lại sơ đồ và thống kê từ dữ liệu hiện có =====
@@ -72,11 +141,25 @@ public partial class MainWindow : Window
         ShowBuilt(cells, summary);
     }
 
+    private static List<ZoneRow> BuildRows(List<ZoneCell> cells) =>
+        cells.Chunk(Zone.MaxColumns).Select(chunk => new ZoneRow(chunk)).ToList();
+
     private void ShowBuilt(List<ZoneCell> cells, FarmSummary summary)
     {
         _cells = cells;
         DataContext = summary;               // cho 7 thẻ thống kê
-        ZoneMatrix.ItemsSource = _cells;     // cho ma trận 144 ô
+
+        // Giữ nguyên hàng đang cuộn tới khi dựng lại sơ đồ
+        ScrollViewer? scroll = GetMatrixScrollViewer();
+        double offset = scroll?.VerticalOffset ?? 0;
+
+        ZoneMatrix.ItemsSource = BuildRows(_cells);
+
+        if (scroll != null && offset > 0)
+        {
+            ZoneMatrix.UpdateLayout();
+            scroll.ScrollToVerticalOffset(offset);
+        }
 
         ApplyFilter();
         UpdateSyncUi();                      // "Đo gần nhất" phụ thuộc cảm biến hiện có
@@ -84,7 +167,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// Tính lại trạng thái theo giờ hiện tại. Chỉ vẽ lại sơ đồ khi có ô đổi trạng thái,
-    /// để không làm giật hoặc nhảy thanh cuộn mỗi lần hẹn giờ.
+    /// để không làm giật hoặc nhảy vị trí cuộn mỗi lần hẹn giờ.
     /// </summary>
     private void RecalculateStatusesIfChanged()
     {
@@ -143,10 +226,10 @@ public partial class MainWindow : Window
         RefreshButton.Content = syncing ? "Đang đồng bộ..." : "Làm mới dữ liệu";
 
         NextSyncText.Text = !_syncService.AutoSyncEnabled
-            ? "Tự động đồng bộ: đang tắt"
+            ? "Đang tắt"
             : syncing
                 ? ""
-                : $"Lần tự động tiếp theo: {FormatLocal(_syncService.NextAutoSyncAtUtc)}";
+                : $"Lần tới: {FormatTime(_syncService.NextAutoSyncAtUtc)}";
 
         if (syncing)
         {
@@ -155,10 +238,16 @@ public partial class MainWindow : Window
             return;
         }
 
-        SyncStatusText.Text =
-            $"Đồng bộ thành công gần nhất: {FormatLocal(_syncService.LastSuccessAtUtc)} | " +
-            $"Đo gần nhất: {FormatLocal(_syncService.GetLatestMeasuredAtUtc())} | " +
-            $"Lần thử gần nhất: {DescribeLastAttempt()}";
+        string summary =
+            $"Đồng bộ lúc {FormatShort(_syncService.LastSuccessAtUtc)}  ·  " +
+            $"Đo gần nhất {FormatShort(_syncService.GetLatestMeasuredAtUtc())}";
+
+        SyncStatusText.Text = _syncService.LastAttemptSucceeded switch
+        {
+            null => "Chưa đồng bộ",
+            true => summary + "  ·  Thành công",
+            false => $"THẤT BẠI ({_syncService.LastErrorMessage}), đang giữ dữ liệu cũ  ·  " + summary
+        };
         SyncStatusText.Foreground = _syncService.LastAttemptSucceeded == false
             ? FailedStatusBrush
             : NormalStatusBrush;
@@ -173,6 +262,20 @@ public partial class MainWindow : Window
 
     private static string FormatLocal(DateTime? utc) =>
         utc == null ? "chưa có" : utc.Value.ToLocalTime().ToString("HH:mm:ss dd/MM/yyyy");
+
+    private static string FormatTime(DateTime? utc) =>
+        utc == null ? "chưa có" : utc.Value.ToLocalTime().ToString("HH:mm:ss");
+
+    /// <summary>Giờ rút gọn: chỉ giờ nếu là hôm nay, kèm ngày nếu là ngày khác.</summary>
+    private static string FormatShort(DateTime? utc)
+    {
+        if (utc == null) return "chưa có";
+
+        DateTime local = utc.Value.ToLocalTime();
+        return local.Date == DateTime.Today
+            ? local.ToString("HH:mm:ss")
+            : local.ToString("HH:mm:ss dd/MM/yyyy");
+    }
 
     // ===== Tìm kiếm và lọc =====
 
@@ -191,6 +294,7 @@ public partial class MainWindow : Window
         bool isFiltering = keyword.Length > 0 || filterKey != "All";
         int zoneCount = _cells.Count(c => c.HasZone);
 
+        ClearFilterButton.Visibility = isFiltering ? Visibility.Visible : Visibility.Collapsed;
         ResultText.Text = isFiltering
             ? $"Khớp {matched} / {_cells.Count} ô"
             : $"{zoneCount} khu vực / {_cells.Count} ô";
@@ -231,7 +335,7 @@ public partial class MainWindow : Window
         ApplyFilter();
     }
 
-    // ===== Nút trên thanh công cụ =====
+    // ===== Các nút =====
 
     private async void Refresh_Click(object sender, RoutedEventArgs e)
     {
@@ -243,7 +347,23 @@ public partial class MainWindow : Window
         OpenAddZoneDialog(null);
     }
 
-    private void SyncInfo_Click(object sender, RoutedEventArgs e)
+    private void NodeList_Click(object sender, RoutedEventArgs e)
+    {
+        var window = new NodeListWindow(_dataSource) { Owner = this };
+        window.ShowDialog();
+
+        if (window.DataChanged)
+        {
+            LoadView();   // ngừng, dùng lại hoặc xóa ESP32 làm thay đổi số cảm biến
+        }
+    }
+
+    private void SyncStatus_Click(object sender, MouseButtonEventArgs e)
+    {
+        ShowSyncInfo();
+    }
+
+    private void ShowSyncInfo()
     {
         string autoText = _syncService.AutoSyncEnabled
             ? $"bật, mỗi {_syncService.AutoSyncInterval.TotalMinutes:0} phút, lần tới lúc {FormatLocal(_syncService.NextAutoSyncAtUtc)}"
@@ -265,13 +385,7 @@ public partial class MainWindow : Window
         MessageBox.Show(message, "Thông tin đồng bộ", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
-    private void NodeList_Click(object sender, RoutedEventArgs e)
-    {
-        var window = new NodeListWindow(_dataSource) { Owner = this };
-        window.ShowDialog();
-    }
-
-    // ===== Đồng bộ tự động và công cụ thử nghiệm =====
+    // ===== Đồng bộ tự động =====
 
     private void AutoSync_Changed(object sender, RoutedEventArgs e)
     {
@@ -279,12 +393,22 @@ public partial class MainWindow : Window
         _syncService.SetAutoSyncEnabled(AutoSyncCheck.IsChecked == true);
     }
 
+    // ===== Menu thử nghiệm (chỉ có với dữ liệu mô phỏng) =====
+
+    private void TestMenuButton_Click(object sender, RoutedEventArgs e)
+    {
+        TestMenu.PlacementTarget = TestMenuButton;
+        TestMenu.Placement = PlacementMode.Bottom;
+        TestMenu.IsOpen = true;
+    }
+
     private void Simulation_Changed(object sender, RoutedEventArgs e)
     {
         if (!_isReady || _simulation == null) return;
 
-        _simulation.SimulateSyncError = SimErrorCheck.IsChecked == true;
-        _simulation.SimulateDisconnected = SimDisconnectedCheck.IsChecked == true;
+        bool disconnected = SimDisconnectedItem.IsChecked;
+        _simulation.SimulateDisconnected = disconnected;
+        SimWarnBadge.Visibility = disconnected ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void AgeData_Click(object sender, RoutedEventArgs e)
@@ -300,9 +424,9 @@ public partial class MainWindow : Window
         if (_simulation == null) return;
 
         MessageBoxResult answer = MessageBox.Show(
-            "Tạo khu vực mẫu cho mọi ô còn trống để đủ 144 khu vực, kèm ESP32 và cảm biến mô phỏng?\n\n" +
+            $"Tạo khu vực mẫu cho mọi ô còn trống để đủ {Zone.MaxZones} khu vực, kèm ESP32 và cảm biến mô phỏng?\n\n" +
             "Khu vực, cảm biến và ESP32 bạn đã tạo được giữ nguyên.",
-            "Tạo đủ 144 khu vực mẫu", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+            "Tạo đủ khu vực mẫu", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
         if (answer != MessageBoxResult.Yes) return;
 
         _simulation.FillAllZones();
@@ -331,7 +455,7 @@ public partial class MainWindow : Window
 
         if (service.GetFreeCodes().Count == 0)
         {
-            MessageBox.Show("Đã đủ 144 khu vực, không thể thêm khu vực mới.", "Thêm khu vực",
+            MessageBox.Show($"Đã đủ {Zone.MaxZones} khu vực, không thể thêm khu vực mới.", "Thêm khu vực",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }

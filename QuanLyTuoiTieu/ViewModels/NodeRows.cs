@@ -25,7 +25,7 @@ public class NodeRow
     public string NotesText { get; init; } = "";
 }
 
-/// <summary>Một cảm biến do ESP32 đang chọn phụ trách.</summary>
+/// <summary>Một cảm biến do ESP32 đang chọn phụ trách (hoặc đã gỡ cùng ESP32).</summary>
 public class NodeSensorRow
 {
     public string Id { get; init; } = "";
@@ -33,4 +33,7 @@ public class NodeSensorRow
     public string ZoneCode { get; init; } = "";
     public string TypeName { get; init; } = "";
     public string StatusText { get; init; } = "";
+
+    /// <summary>true = cảm biến đã gỡ cùng ESP32 (sẽ được khôi phục khi dùng lại ESP32).</summary>
+    public bool IsRemoved { get; init; }
 }

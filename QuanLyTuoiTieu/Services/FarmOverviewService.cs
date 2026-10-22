@@ -3,14 +3,15 @@ using QuanLyTuoiTieu.ViewModels;
 
 namespace QuanLyTuoiTieu.Services;
 
-/// <summary>Dựng ma trận 144 ô và số liệu thống kê từ nguồn dữ liệu.</summary>
+/// <summary>Dựng ma trận 156 ô và số liệu thống kê từ nguồn dữ liệu.</summary>
 public class FarmOverviewService
 {
     /// <summary>
-    /// Dữ liệu cũ hơn mức này bị coi là "đã cũ".
-    /// Giả định kỹ thuật tạm thời: 10 phút (đo) + 20 phút (đồng bộ) + 15 phút dự phòng.
+    /// Dữ liệu cũ hơn mức này bị coi là "đã cũ". Đổi con số ở đây nếu cần.
+    /// Lưu ý: node đo mỗi 10 phút, ứng dụng đồng bộ mỗi 20 phút, nên dữ liệu có thể già tới khoảng 30 phút
+    /// trước lần đồng bộ kế tiếp; ngưỡng thấp hơn 30 phút có thể báo "cũ" trong lúc vẫn bình thường.
     /// </summary>
-    public static readonly TimeSpan StaleAfter = TimeSpan.FromMinutes(45);
+    public static readonly TimeSpan StaleAfter = TimeSpan.FromMinutes(25);
 
     private readonly IFarmDataSource _dataSource;
 
@@ -19,7 +20,7 @@ public class FarmOverviewService
         _dataSource = dataSource;
     }
 
-    /// <summary>Mã khu vực từ hàng/cột. Ví dụ (1,1) -> A01; (12,12) -> L12.</summary>
+    /// <summary>Mã khu vực từ hàng/cột. Ví dụ (1,1) -> A01; (13,12) -> M12.</summary>
     public static string MakeCode(int row, int column) => $"{(char)('A' + row - 1)}{column:00}";
 
     public (List<ZoneCell> Cells, FarmSummary Summary) Build()
@@ -83,7 +84,6 @@ public class FarmOverviewService
         IReadOnlyDictionary<string, Measurement> latest,
         DateTime nowUtc)
     {
-        if (!zone.IsActive) return ZoneStatus.Disabled;
         if (activeSensors.Count == 0) return ZoneStatus.NotConfigured;
 
         var dataStatuses = activeSensors

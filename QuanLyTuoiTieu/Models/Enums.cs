@@ -6,8 +6,7 @@ public enum ZoneStatus
     NotConfigured,  // Chưa cấu hình (chưa có cảm biến)
     Normal,         // Đang hoạt động bình thường
     Warning,        // Có cảnh báo
-    Disconnected,   // Mất kết nối / không nhận được dữ liệu mới
-    Disabled        // Ngừng hoạt động (người dùng đặt IsActive = false)
+    Disconnected    // Mất kết nối / không nhận được dữ liệu mới
 }
 
 /// <summary>Trạng thái của thiết bị cảm biến.</summary>
@@ -15,7 +14,7 @@ public enum SensorStatus
 {
     Active,   // Đang hoạt động
     Faulty,   // Có lỗi
-    Removed   // Đã gỡ / ngừng hoạt động (vẫn giữ lịch sử)
+    Removed   // Đã gỡ (vẫn giữ lịch sử cho tới khi xóa hẳn)
 }
 
 /// <summary>Trạng thái dữ liệu đo gần nhất của một cảm biến.</summary>

@@ -117,8 +117,11 @@
             <CheckBox x:Name="ShowRemovedCheck" DockPanel.Dock="Right" VerticalAlignment="Center"
                       Checked="ShowRemoved_Changed" Unchecked="ShowRemoved_Changed"/>
             <Button x:Name="AddSensorButton" DockPanel.Dock="Right" Content="+ Thêm cảm biến"
-                    Padding="12,4" Margin="0,0,20,0" Click="AddSensor_Click"
-                    ToolTipService.ShowOnDisabled="True"/>
+                    Padding="12,4" Margin="0,0,20,0" Click="AddSensor_Click"/>
+            <Button x:Name="DeleteSensorButton" DockPanel.Dock="Right" Content="Xóa cảm biến"
+                    Padding="12,4" Margin="0,0,8,0" IsEnabled="False" Click="DeleteSensor_Click"
+                    ToolTipService.ShowOnDisabled="True"
+                    ToolTip="Chọn một cảm biến đã gỡ rồi nhấn để xóa hẳn khỏi dữ liệu"/>
             <Button x:Name="RestoreSensorButton" DockPanel.Dock="Right" Content="Khôi phục"
                     Padding="12,4" Margin="0,0,8,0" IsEnabled="False" Click="RestoreSensor_Click"
                     ToolTipService.ShowOnDisabled="True"
@@ -218,13 +221,14 @@
         </DataGrid>
 
         <!-- ===== 5. Chân cửa sổ ===== -->
+        <!-- ===== 5. Chân cửa sổ ===== -->
         <Border Grid.Row="5" Margin="0,12,0,0" Background="White" BorderBrush="#E5E7EB"
                 BorderThickness="0,1,0,0" Padding="16,8">
             <DockPanel>
                 <Button DockPanel.Dock="Right" Content="Đóng" Width="100" Padding="12,5"
                         Click="Close_Click"/>
-                <Button x:Name="ToggleActiveButton" DockPanel.Dock="Right" Width="160" Padding="12,5"
-                        Margin="0,0,8,0" Click="ToggleActive_Click"/>
+                <Button DockPanel.Dock="Right" Content="Xóa khu vực" Width="120" Padding="12,5"
+                        Margin="0,0,8,0" Click="DeleteZone_Click"/>
                 <Button DockPanel.Dock="Right" Content="Sửa thông tin" Width="120" Padding="12,5"
                         Margin="0,0,8,0" Click="EditZone_Click"/>
                 <TextBlock x:Name="FooterNote" Foreground="#6B7280" VerticalAlignment="Center"

@@ -15,7 +15,7 @@
             <Setter Property="BorderBrush" Value="#E5E7EB"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="CornerRadius" Value="8"/>
-            <Setter Property="Padding" Value="14,10"/>
+            <Setter Property="Padding" Value="12,6"/>
             <Setter Property="Margin" Value="4"/>
         </Style>
         <Style x:Key="StatLabel" TargetType="TextBlock">
@@ -24,20 +24,52 @@
             <Setter Property="TextWrapping" Value="Wrap"/>
         </Style>
         <Style x:Key="StatValue" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="28"/>
+            <Setter Property="FontSize" Value="22"/>
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="Foreground" Value="#111827"/>
         </Style>
 
-        <!-- ===== Chú giải ===== -->
-        <Style x:Key="LegendChip" TargetType="Border">
+        <!-- ===== Chú giải (ô màu nhỏ + biểu tượng + chữ) ===== -->
+        <Style x:Key="LegendSwatch" TargetType="Border">
+            <Setter Property="Width" Value="14"/>
+            <Setter Property="Height" Value="14"/>
+            <Setter Property="CornerRadius" Value="3"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="CornerRadius" Value="4"/>
-            <Setter Property="Padding" Value="8,3"/>
-            <Setter Property="Margin" Value="0,0,8,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="LegendText" TargetType="TextBlock">
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="5,0,0,0"/>
         </Style>
 
-        <!-- ===== Ô khu vực trong ma trận ===== -->
+        <!-- ===== Nút chính (nền xanh) ===== -->
+        <Style x:Key="PrimaryButton" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="#166534"/>
+            <Setter Property="Padding" Value="14,5"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                CornerRadius="4" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#14532D"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ===== Ô khu vực trong ma trận (giữ nguyên thiết kế) ===== -->
         <Style x:Key="ZoneCellStyle" TargetType="Button">
             <Setter Property="Margin" Value="3"/>
             <Setter Property="Cursor" Value="Hand"/>
@@ -92,11 +124,6 @@
                                 <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource DisconnectedBorder}"/>
                                 <Setter Property="Foreground" Value="{StaticResource DisconnectedFg}"/>
                             </DataTrigger>
-                            <DataTrigger Binding="{Binding Status}" Value="{x:Static m:ZoneStatus.Disabled}">
-                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource DisabledBg}"/>
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource DisabledBorder}"/>
-                                <Setter Property="Foreground" Value="{StaticResource DisabledFg}"/>
-                            </DataTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -110,214 +137,262 @@
             <!-- Tiêu đề -->
             <RowDefinition Height="Auto"/>
             <!-- Thống kê -->
-            <RowDefinition Height="Auto"/>
-            <!-- Chú giải -->
             <RowDefinition Height="*"/>
-            <!-- Ma trận -->
+            <!-- Khung sơ đồ -->
             <RowDefinition Height="Auto"/>
-            <!-- Thanh trạng thái -->
+            <!-- Thanh dưới cùng -->
         </Grid.RowDefinitions>
 
-        <!-- ===== 1. Tiêu đề ===== -->
-        <Border Grid.Row="0" Background="#166534" Padding="20,14">
+        <!-- ===== 1. Thanh tiêu đề ===== -->
+        <Border Grid.Row="0" Background="#166534" Padding="20,10">
             <DockPanel>
+                <!-- Menu công cụ thử nghiệm (chỉ hiện với dữ liệu mô phỏng) -->
+                <Button x:Name="TestMenuButton" DockPanel.Dock="Right" Content="Thử nghiệm ▾"
+                        Padding="12,3" Margin="10,0,0,0" VerticalAlignment="Center"
+                        ToolTip="Công cụ thử nghiệm (chỉ có với dữ liệu mô phỏng)"
+                        Click="TestMenuButton_Click">
+                    <Button.ContextMenu>
+                        <ContextMenu x:Name="TestMenu">
+                            <MenuItem x:Name="SimDisconnectedItem" Header="Giả lập mất kết nối"
+                                      IsCheckable="True"
+                                      ToolTip="Lần đồng bộ sau không có phản hồi, chờ hết thời gian chờ (30 giây) rồi báo thất bại"
+                                      Checked="Simulation_Changed" Unchecked="Simulation_Changed"/>
+                            <Separator/>
+                            <MenuItem Header="Tua dữ liệu cũ thêm 1 giờ" Click="AgeData_Click"
+                                      ToolTip="Làm mọi giá trị đo cũ thêm 1 giờ ngay lập tức, để xem trạng thái dữ liệu cũ và mất kết nối"/>
+                            <MenuItem Header="Tạo đủ 144 khu vực mẫu" Click="FillZones_Click"
+                                      ToolTip="Điền mọi ô còn trống bằng khu vực mẫu kèm ESP32 và cảm biến mô phỏng"/>
+                            <MenuItem Header="Đặt lại dữ liệu mẫu" Click="ResetSample_Click"
+                                      ToolTip="Quay về 48 khu vực mẫu ban đầu. Mọi thay đổi của bạn sẽ mất"/>
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                </Button>
+
                 <Border x:Name="SimulatedBadge" DockPanel.Dock="Right" Background="#FEF3C7" CornerRadius="12"
-                        Padding="12,4" VerticalAlignment="Center">
-                    <TextBlock Text="DỮ LIỆU MÔ PHỎNG" Foreground="#92400E"
+                        Padding="12,4" Margin="10,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="DỮ LIỆU MÔ PHỎNG" Foreground="#92400E" FontWeight="SemiBold" FontSize="12"/>
+                </Border>
+
+                <!-- Nhắc đang giả lập mất kết nối (chỉ hiện khi bật) -->
+                <Border x:Name="SimWarnBadge" DockPanel.Dock="Right" Visibility="Collapsed"
+                        Background="#FEE2E2" BorderBrush="#FCA5A5" BorderThickness="1" CornerRadius="12"
+                        Padding="12,3" Margin="10,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="ĐANG GIẢ LẬP MẤT KẾT NỐI" Foreground="#991B1B"
                                FontWeight="SemiBold" FontSize="12"/>
                 </Border>
-                <StackPanel>
-                    <TextBlock Text="PHẦN MỀM QUẢN LÝ GIÁM SÁT NÔNG NGHIỆP"
-                               Foreground="White" FontSize="22" FontWeight="Bold"/>
-                    <TextBlock Text="Quản lý và giám sát các khu vực canh tác"
-                               Foreground="#BBF7D0" Margin="0,2,0,0"/>
-                </StackPanel>
+
+                <TextBlock Text="PHẦN MỀM QUẢN LÝ GIÁM SÁT NÔNG NGHIỆP" Foreground="White"
+                           FontSize="20" FontWeight="Bold" VerticalAlignment="Center"/>
             </DockPanel>
         </Border>
 
-        <!-- ===== 2. Thống kê tổng quan (binding tới FarmSummary) ===== -->
-        <UniformGrid Grid.Row="1" Columns="7" Margin="12,12,12,0">
-            <Border Style="{StaticResource StatCard}">
-                <StackPanel>
-                    <TextBlock Style="{StaticResource StatLabel}" Text="Tổng số khu vực"/>
-                    <TextBlock Style="{StaticResource StatValue}" Text="{Binding TotalZones}"/>
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource StatCard}">
-                <StackPanel>
-                    <TextBlock Style="{StaticResource StatLabel}" Text="Hoạt động bình thường"/>
-                    <TextBlock Style="{StaticResource StatValue}" Foreground="#166534" Text="{Binding NormalZones}"/>
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource StatCard}">
-                <StackPanel>
-                    <TextBlock Style="{StaticResource StatLabel}" Text="Khu vực có cảnh báo"/>
-                    <TextBlock Style="{StaticResource StatValue}" Foreground="#B45309" Text="{Binding WarningZones}"/>
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource StatCard}">
-                <StackPanel>
-                    <TextBlock Style="{StaticResource StatLabel}" Text="Khu vực mất kết nối"/>
-                    <TextBlock Style="{StaticResource StatValue}" Foreground="#B91C1C" Text="{Binding DisconnectedZones}"/>
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource StatCard}">
-                <StackPanel>
-                    <TextBlock Style="{StaticResource StatLabel}" Text="Tổng số cảm biến"/>
-                    <TextBlock Style="{StaticResource StatValue}" Text="{Binding TotalSensors}"/>
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource StatCard}">
-                <StackPanel>
-                    <TextBlock Style="{StaticResource StatLabel}" Text="Cảm biến hoạt động"/>
-                    <TextBlock Style="{StaticResource StatValue}" Foreground="#166534" Text="{Binding ActiveSensors}"/>
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource StatCard}">
-                <StackPanel>
-                    <TextBlock Style="{StaticResource StatLabel}" Text="Cảm biến lỗi"/>
-                    <TextBlock Style="{StaticResource StatValue}" Foreground="#B91C1C" Text="{Binding FaultySensors}"/>
-                </StackPanel>
-            </Border>
-        </UniformGrid>
+        <!-- ===== 2. Thẻ thống kê (hai nhóm: khu vực, cảm biến) ===== -->
+        <Grid Grid.Row="1" Margin="12,12,12,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="4*"/>
+                <ColumnDefinition Width="20"/>
+                <ColumnDefinition Width="3*"/>
+            </Grid.ColumnDefinitions>
 
-        <!-- ===== 3. Chú giải trạng thái ===== -->
-        <WrapPanel Grid.Row="2" Margin="16,12,16,0">
-            <TextBlock Text="Chú giải:" FontWeight="SemiBold" Margin="0,0,12,0" VerticalAlignment="Center"/>
+            <UniformGrid Grid.Column="0" Columns="4">
+                <Border Style="{StaticResource StatCard}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource StatLabel}" Text="Tổng số khu vực"/>
+                        <TextBlock Style="{StaticResource StatValue}" Text="{Binding TotalZones}"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource StatCard}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource StatLabel}" Text="Hoạt động bình thường"/>
+                        <TextBlock Style="{StaticResource StatValue}" Foreground="#166534" Text="{Binding NormalZones}"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource StatCard}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource StatLabel}" Text="Khu vực có cảnh báo"/>
+                        <TextBlock Style="{StaticResource StatValue}" Foreground="#B45309" Text="{Binding WarningZones}"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource StatCard}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource StatLabel}" Text="Khu vực mất kết nối"/>
+                        <TextBlock Style="{StaticResource StatValue}" Foreground="#B91C1C" Text="{Binding DisconnectedZones}"/>
+                    </StackPanel>
+                </Border>
+            </UniformGrid>
 
-            <Border Style="{StaticResource LegendChip}"
-                    Background="{StaticResource NormalBg}" BorderBrush="{StaticResource NormalBorder}">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="✔" FontFamily="Segoe UI Symbol" Foreground="{StaticResource NormalFg}" Margin="0,0,5,0"/>
-                    <TextBlock Text="Bình thường" Foreground="{StaticResource NormalFg}"/>
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource LegendChip}"
-                    Background="{StaticResource WarningBg}" BorderBrush="{StaticResource WarningBorder}">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="⚠" FontFamily="Segoe UI Symbol" Foreground="{StaticResource WarningFg}" Margin="0,0,5,0"/>
-                    <TextBlock Text="Cảnh báo" Foreground="{StaticResource WarningFg}"/>
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource LegendChip}"
-                    Background="{StaticResource DisconnectedBg}" BorderBrush="{StaticResource DisconnectedBorder}">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="✖" FontFamily="Segoe UI Symbol" Foreground="{StaticResource DisconnectedFg}" Margin="0,0,5,0"/>
-                    <TextBlock Text="Mất kết nối" Foreground="{StaticResource DisconnectedFg}"/>
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource LegendChip}"
-                    Background="{StaticResource NotConfiguredBg}" BorderBrush="{StaticResource NotConfiguredBorder}">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="○" FontFamily="Segoe UI Symbol" Foreground="{StaticResource NotConfiguredFg}" Margin="0,0,5,0"/>
-                    <TextBlock Text="Chưa cấu hình" Foreground="{StaticResource NotConfiguredFg}"/>
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource LegendChip}"
-                    Background="{StaticResource DisabledBg}" BorderBrush="{StaticResource DisabledBorder}">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="⊘" FontFamily="Segoe UI Symbol" Foreground="{StaticResource DisabledFg}" Margin="0,0,5,0"/>
-                    <TextBlock Text="Ngừng hoạt động" Foreground="{StaticResource DisabledFg}"/>
-                </StackPanel>
-            </Border>
-            <Border Style="{StaticResource LegendChip}"
-                    Background="{StaticResource EmptyBg}" BorderBrush="{StaticResource EmptyBorder}">
-                <TextBlock Text="Trống (chưa có khu vực)" Foreground="{StaticResource EmptyFg}"/>
-            </Border>
-        </WrapPanel>
+            <UniformGrid Grid.Column="2" Columns="3">
+                <Border Style="{StaticResource StatCard}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource StatLabel}" Text="Tổng số cảm biến"/>
+                        <TextBlock Style="{StaticResource StatValue}" Text="{Binding TotalSensors}"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource StatCard}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource StatLabel}" Text="Cảm biến hoạt động"/>
+                        <TextBlock Style="{StaticResource StatValue}" Foreground="#166534" Text="{Binding ActiveSensors}"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource StatCard}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource StatLabel}" Text="Cảm biến lỗi"/>
+                        <TextBlock Style="{StaticResource StatValue}" Foreground="#B91C1C" Text="{Binding FaultySensors}"/>
+                    </StackPanel>
+                </Border>
+            </UniformGrid>
+        </Grid>
 
-        <!-- ===== 4. Ma trận khu vực (kèm thanh công cụ) ===== -->
-        <Border Grid.Row="3" Margin="12" Background="White" BorderBrush="#E5E7EB"
-                BorderThickness="1" CornerRadius="8">
-            <DockPanel>
-                <TextBlock DockPanel.Dock="Top" Margin="16,12,16,4" FontWeight="SemiBold" FontSize="14"
-                           Text="SƠ ĐỒ KHU VỰC (12 hàng × 12 cột, tối đa 144 khu vực)"/>
+        <!-- ===== 3. Khung sơ đồ khu vực =====
+             MatrixHost là vùng còn lại; MatrixFrame co theo nội dung. Mã trong MainWindow.xaml.cs
+             đặt chiều cao ma trận (ZoneMatrix.Height) bằng số nguyên hàng để không bao giờ thấy nửa hàng. -->
+        <Grid x:Name="MatrixHost" Grid.Row="2" Margin="12,8,12,8" SizeChanged="MatrixHost_SizeChanged">
+            <Border x:Name="MatrixFrame" VerticalAlignment="Top" Background="White" BorderBrush="#E5E7EB"
+                    BorderThickness="1" CornerRadius="8" Padding="0,0,0,4">
+                <DockPanel>
 
-                <!-- Thanh công cụ -->
-                <WrapPanel DockPanel.Dock="Top" Margin="16,4,16,8">
-                    <TextBlock Text="Tìm kiếm:" VerticalAlignment="Center" Margin="0,2,6,2"/>
-                    <TextBox x:Name="SearchBox" Width="200" Padding="4,4" Margin="0,2,0,2"
-                             VerticalContentAlignment="Center"
-                             ToolTip="Nhập mã (ví dụ A01) hoặc tên khu vực"
-                             TextChanged="SearchBox_TextChanged"/>
+                    <!-- Dòng 1: tiêu đề sơ đồ + chú giải -->
+                    <DockPanel DockPanel.Dock="Top" Margin="16,10,16,0">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" Margin="16,0,0,0">
+                                <Border Style="{StaticResource LegendSwatch}"
+                                        Background="{StaticResource NormalBg}" BorderBrush="{StaticResource NormalBorder}"/>
+                                <TextBlock Style="{StaticResource LegendText}" Foreground="{StaticResource NormalFg}">
+                                    <Run FontFamily="Segoe UI Symbol" Text="✔"/><Run Text=" Bình thường"/>
+                                </TextBlock>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="16,0,0,0">
+                                <Border Style="{StaticResource LegendSwatch}"
+                                        Background="{StaticResource WarningBg}" BorderBrush="{StaticResource WarningBorder}"/>
+                                <TextBlock Style="{StaticResource LegendText}" Foreground="{StaticResource WarningFg}">
+                                    <Run FontFamily="Segoe UI Symbol" Text="⚠"/><Run Text=" Cảnh báo"/>
+                                </TextBlock>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="16,0,0,0">
+                                <Border Style="{StaticResource LegendSwatch}"
+                                        Background="{StaticResource DisconnectedBg}" BorderBrush="{StaticResource DisconnectedBorder}"/>
+                                <TextBlock Style="{StaticResource LegendText}" Foreground="{StaticResource DisconnectedFg}">
+                                    <Run FontFamily="Segoe UI Symbol" Text="✖"/><Run Text=" Mất kết nối"/>
+                                </TextBlock>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="16,0,0,0">
+                                <Border Style="{StaticResource LegendSwatch}"
+                                        Background="{StaticResource NotConfiguredBg}" BorderBrush="{StaticResource NotConfiguredBorder}"/>
+                                <TextBlock Style="{StaticResource LegendText}" Foreground="{StaticResource NotConfiguredFg}">
+                                    <Run FontFamily="Segoe UI Symbol" Text="○"/><Run Text=" Chưa cấu hình"/>
+                                </TextBlock>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="16,0,0,0">
+                                <Border Style="{StaticResource LegendSwatch}"
+                                        Background="{StaticResource EmptyBg}" BorderBrush="{StaticResource EmptyBorder}"/>
+                                <TextBlock Style="{StaticResource LegendText}" Foreground="{StaticResource EmptyFg}"
+                                           Text="Trống (chưa có khu vực)"/>
+                            </StackPanel>
+                        </StackPanel>
 
-                    <TextBlock Text="Trạng thái:" VerticalAlignment="Center" Margin="16,2,6,2"/>
-                    <ComboBox x:Name="StatusFilter" Width="170" Padding="6,4" Margin="0,2,0,2"
-                              SelectedIndex="0" SelectionChanged="StatusFilter_SelectionChanged">
-                        <ComboBoxItem Tag="All" Content="Tất cả"/>
-                        <ComboBoxItem Tag="Normal" Content="Bình thường"/>
-                        <ComboBoxItem Tag="Warning" Content="Cảnh báo"/>
-                        <ComboBoxItem Tag="Disconnected" Content="Mất kết nối"/>
-                        <ComboBoxItem Tag="NotConfigured" Content="Chưa cấu hình"/>
-                        <ComboBoxItem Tag="Disabled" Content="Ngừng hoạt động"/>
-                        <ComboBoxItem Tag="Empty" Content="Ô trống (chưa có khu vực)"/>
-                    </ComboBox>
+                        <TextBlock FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"
+                                   Text="SƠ ĐỒ KHU VỰC (12 hàng × 12 cột, tối đa 144 khu vực)"/>
+                    </DockPanel>
 
-                    <Button Content="Xóa bộ lọc" Padding="12,4" Margin="10,2,0,2" Click="ClearFilter_Click"/>
-                    <Button Content="+ Thêm khu vực" Padding="12,4" Margin="24,2,0,2" Click="AddZone_Click"/>
-                    <Button x:Name="RefreshButton" Content="Làm mới dữ liệu" Padding="12,4" Margin="8,2,0,2"
-                            Click="Refresh_Click"/>
-                    <Button Content="Thông tin đồng bộ" Padding="12,4" Margin="8,2,0,2" Click="SyncInfo_Click"/>
-                    <Button Content="Danh sách ESP32" Padding="12,4" Margin="8,2,0,2" Click="NodeList_Click"/>
-                    <TextBlock x:Name="ResultText" Foreground="#6B7280" VerticalAlignment="Center" Margin="20,2,0,2"/>
-                </WrapPanel>
-                <!-- Đồng bộ tự động và công cụ thử nghiệm -->
-                <WrapPanel DockPanel.Dock="Top" Margin="16,0,16,8">
-                    <CheckBox x:Name="AutoSyncCheck" Content="Tự động đồng bộ" IsChecked="True"
-                              VerticalAlignment="Center" Margin="0,2,0,2"
-                              Checked="AutoSync_Changed" Unchecked="AutoSync_Changed"/>
-                    <TextBlock x:Name="NextSyncText" Foreground="#6B7280" VerticalAlignment="Center"
-                               Margin="12,2,0,2"/>
+                    <!-- Dòng 2: tìm kiếm, lọc (trái) và thao tác quản lý (phải) -->
+                    <DockPanel DockPanel.Dock="Top" Margin="16,8,16,10">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <Button Content="Danh sách ESP32" Padding="12,4" Margin="0,0,8,0"
+                                    Click="NodeList_Click"/>
+                            <Button Style="{StaticResource PrimaryButton}" Content="+ Thêm khu vực"
+                                    Click="AddZone_Click"/>
+                        </StackPanel>
 
-                    <Border x:Name="SimulationPanel" Background="#FEF3C7" BorderBrush="#FCD34D"
-                            BorderThickness="1" CornerRadius="6" Padding="10,3" Margin="24,2,0,2">
-                        <WrapPanel>
-                            <TextBlock Text="Thử nghiệm (mô phỏng):" Foreground="#92400E"
-                                       FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,2,10,2"/>
-                            <CheckBox x:Name="SimErrorCheck" Content="Lỗi đồng bộ" VerticalAlignment="Center"
-                                      Margin="0,2,10,2" Checked="Simulation_Changed" Unchecked="Simulation_Changed"
-                                      ToolTip="Lần đồng bộ sau sẽ thất bại ngay với thông báo lỗi"/>
-                            <CheckBox x:Name="SimDisconnectedCheck" Content="Mất kết nối" VerticalAlignment="Center"
-                                      Margin="0,2,10,2" Checked="Simulation_Changed" Unchecked="Simulation_Changed"
-                                      ToolTip="Lần đồng bộ sau không có phản hồi, chờ hết thời gian chờ (30 giây) rồi báo thất bại"/>
-                            <Button Content="Tua dữ liệu cũ thêm 1 giờ" Padding="10,2" Margin="0,2,8,2"
-                                    Click="AgeData_Click"
-                                    ToolTip="Làm mọi giá trị đo cũ thêm 1 giờ ngay lập tức, để xem trạng thái 'Dữ liệu đã cũ' và 'Mất kết nối'"/>
-                            <Button Content="Tạo đủ 144 khu vực mẫu" Padding="10,2" Margin="0,2,8,2"
-                                    Click="FillZones_Click"
-                                    ToolTip="Điền mọi ô còn trống bằng khu vực mẫu kèm ESP32 và cảm biến mô phỏng, để thử với 144 khu vực"/>
-                            <Button Content="Đặt lại dữ liệu mẫu" Padding="10,2" Margin="0,2,0,2"
-                                    Click="ResetSample_Click"
-                                    ToolTip="Quay về 48 khu vực mẫu ban đầu. Mọi thay đổi của bạn sẽ mất"/>
-                        </WrapPanel>
-                    </Border>
-                </WrapPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Tìm kiếm:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <TextBox x:Name="SearchBox" Width="200" Padding="4,4"
+                                     VerticalContentAlignment="Center"
+                                     ToolTip="Nhập mã (ví dụ A01) hoặc tên khu vực"
+                                     TextChanged="SearchBox_TextChanged"/>
 
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <ItemsControl x:Name="ZoneMatrix" Margin="8,0,8,8">
+                            <TextBlock Text="Trạng thái:" VerticalAlignment="Center" Margin="16,0,6,0"/>
+                            <ComboBox x:Name="StatusFilter" Width="170" Padding="6,4"
+                                      SelectedIndex="0" SelectionChanged="StatusFilter_SelectionChanged">
+                                <ComboBoxItem Tag="All" Content="Tất cả"/>
+                                <ComboBoxItem Tag="Normal" Content="Bình thường"/>
+                                <ComboBoxItem Tag="Warning" Content="Cảnh báo"/>
+                                <ComboBoxItem Tag="Disconnected" Content="Mất kết nối"/>
+                                <ComboBoxItem Tag="NotConfigured" Content="Chưa cấu hình"/>
+                                <ComboBoxItem Tag="Empty" Content="Ô trống (chưa có khu vực)"/>
+                            </ComboBox>
+
+                            <!-- Chỉ hiện khi đang có tìm kiếm hoặc lọc -->
+                            <Button x:Name="ClearFilterButton" Content="Xóa bộ lọc" Padding="10,4"
+                                    Margin="10,0,0,0" Visibility="Collapsed" Click="ClearFilter_Click"/>
+
+                            <TextBlock x:Name="ResultText" Foreground="#6B7280" VerticalAlignment="Center"
+                                       Margin="16,0,0,0"/>
+                        </StackPanel>
+                    </DockPanel>
+
+                    <!-- Ma trận: cuộn theo từng hàng (mỗi mục là một hàng 12 ô) -->
+                    <ItemsControl x:Name="ZoneMatrix" Margin="8,0,8,0"
+                                  PreviewMouseWheel="ZoneMatrix_PreviewMouseWheel">
+                        <ItemsControl.Template>
+                            <ControlTemplate TargetType="ItemsControl">
+                                <ScrollViewer x:Name="MatrixScroll" CanContentScroll="True" Focusable="False"
+                                              VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled">
+                                    <ItemsPresenter/>
+                                </ScrollViewer>
+                            </ControlTemplate>
+                        </ItemsControl.Template>
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <UniformGrid Columns="12"/>
+                                <VirtualizingStackPanel/>
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Button Style="{StaticResource ZoneCellStyle}" Height="60"
-                                        ToolTip="{Binding ToolTipText}"
-                                        Click="ZoneCell_Click"/>
+                                <!-- Một hàng: 12 ô, cao đúng 66 px (ô 60 + lề 3 + 3) -->
+                                <ItemsControl ItemsSource="{Binding Cells}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <UniformGrid Rows="1" Columns="12"/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Style="{StaticResource ZoneCellStyle}" Height="60"
+                                                    ToolTip="{Binding ToolTipText}"
+                                                    Click="ZoneCell_Click"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                </ScrollViewer>
-            </DockPanel>
-        </Border>
+                </DockPanel>
+            </Border>
+        </Grid>
 
-        <!-- ===== 5. Thanh trạng thái ===== -->
-        <Border Grid.Row="4" Background="White" BorderBrush="#E5E7EB" BorderThickness="0,1,0,0" Padding="16,6">
+        <!-- ===== 4. Thanh dưới cùng: nguồn dữ liệu và đồng bộ ===== -->
+        <Border Grid.Row="3" Background="White" BorderBrush="#E5E7EB" BorderThickness="0,1,0,0"
+                Padding="16,4">
             <DockPanel>
-                <TextBlock x:Name="SyncStatusText" DockPanel.Dock="Right" Foreground="#6B7280"/>
-                <TextBlock x:Name="SourceText" Foreground="#6B7280" Margin="0,0,16,0"
-                           TextTrimming="CharacterEllipsis"/>
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock x:Name="SourceText" Foreground="#6B7280" VerticalAlignment="Center"/>
+                    <Border Width="1" Background="#E5E7EB" Margin="12,2,12,2"/>
+                    <Button x:Name="RefreshButton" Content="Làm mới dữ liệu" Padding="10,2" MinWidth="120"
+                            Click="Refresh_Click"/>
+                    <CheckBox x:Name="AutoSyncCheck" IsChecked="True" VerticalAlignment="Center"
+                              Margin="12,0,0,0" Checked="AutoSync_Changed" Unchecked="AutoSync_Changed"/>
+                    <TextBlock x:Name="NextSyncText" Foreground="#6B7280" VerticalAlignment="Center"
+                               Margin="10,0,0,0"/>
+                </StackPanel>
+
+                <!-- Kết quả đồng bộ; nhấn để xem thông tin chi tiết -->
+                <TextBlock x:Name="SyncStatusText" Foreground="#6B7280" VerticalAlignment="Center"
+                           TextAlignment="Right" TextTrimming="CharacterEllipsis" Margin="16,0,0,0"
+                           Background="Transparent" Cursor="Hand"
+                           ToolTip="Nhấn để xem thông tin đồng bộ chi tiết"
+                           MouseLeftButtonUp="SyncStatus_Click"/>
             </DockPanel>
         </Border>
     </Grid>

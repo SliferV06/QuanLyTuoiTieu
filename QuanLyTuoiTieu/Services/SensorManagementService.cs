@@ -41,10 +41,9 @@ public class SensorManagementService
             .OrderBy(n => n.Id)
             .ToList();
 
-    /// <summary>Các khu vực có thể chuyển cảm biến vào: đang sử dụng, cộng khu vực hiện tại.</summary>
+    /// <summary>Các khu vực có thể chuyển cảm biến vào (mọi khu vực hiện có).</summary>
     public List<Zone> GetZonesForSensor(string currentZoneCode) =>
         _dataSource.GetZones()
-            .Where(z => z.IsActive || z.Code == currentZoneCode)
             .OrderBy(z => z.Code)
             .ToList();
 
@@ -102,8 +101,6 @@ public class SensorManagementService
 
         Zone? zone = _dataSource.GetZones().FirstOrDefault(z => z.Code == zoneCode);
         if (zone == null) return "Vui lòng chọn khu vực lắp đặt.";
-        if (zone.Code != existing.ZoneCode && !zone.IsActive)
-            return $"Khu vực {zone.Code} đang ngừng sử dụng, không thể chuyển cảm biến vào.";
 
         string? error = CheckName(name);
         if (error != null) return error;
@@ -189,8 +186,6 @@ public class SensorManagementService
 
         Zone? zone = _dataSource.GetZones().FirstOrDefault(z => z.Code == existing.ZoneCode);
         if (zone == null) return $"Không tìm thấy khu vực {existing.ZoneCode}.";
-        if (!zone.IsActive)
-            return "Khu vực đang ngừng sử dụng. Hãy dùng lại khu vực trước khi khôi phục cảm biến.";
 
         Esp32Node? node = _dataSource.GetNodes().FirstOrDefault(n => n.Id == existing.NodeId);
         if (node is { IsActive: false })
@@ -215,7 +210,26 @@ public class SensorManagementService
             return ex.Message;
         }
     }
+    // ===== Xóa hẳn cảm biến =====
 
+    /// <summary>Xóa hẳn một cảm biến ĐÃ GỠ (không khôi phục được). Mã cảm biến sau đó dùng lại được.</summary>
+    public string? DeleteSensor(string sensorId)
+    {
+        Sensor? existing = _dataSource.GetSensors().FirstOrDefault(s => s.Id == sensorId);
+        if (existing == null) return $"Không tìm thấy cảm biến {sensorId}.";
+        if (existing.Status != SensorStatus.Removed)
+            return "Chỉ xóa hẳn được cảm biến đã gỡ. Hãy gỡ cảm biến trước.";
+
+        try
+        {
+            _dataSource.DeleteSensor(existing.Id);
+            return null;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ex.Message;
+        }
+    }
     // ===== Thay thế cảm biến =====
 
     /// <summary>
@@ -262,7 +276,6 @@ public class SensorManagementService
 
         Zone? zone = _dataSource.GetZones().FirstOrDefault(z => z.Code == zoneCode);
         if (zone == null) return $"Không tìm thấy khu vực {zoneCode}.";
-        if (!zone.IsActive) return "Khu vực đang ngừng sử dụng. Hãy dùng lại khu vực trước khi thêm cảm biến.";
 
         SensorType? type = _dataSource.GetSensorTypes().FirstOrDefault(t => t.Id == typeId);
         if (type == null) return "Vui lòng chọn loại cảm biến.";

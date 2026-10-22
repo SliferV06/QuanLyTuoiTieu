@@ -6,7 +6,7 @@ namespace QuanLyTuoiTieu.Data;
 /// <summary>
 /// DỮ LIỆU MÔ PHỎNG (GIẢ LẬP) dùng trong giai đoạn làm giao diện.
 /// KHÔNG phải dữ liệu đo thật. Giá trị cố định, không ngẫu nhiên.
-/// Cấu hình (khu vực, cảm biến) giữ nguyên khi Refresh(); chỉ giá trị đo được tạo lại.
+/// Cấu hình (khu vực, cảm biến, ESP32) giữ nguyên khi làm mới; chỉ giá trị đo được tạo lại.
 /// </summary>
 public class MockFarmDataSource : IFarmDataSource, ISimulationControls
 {
@@ -24,6 +24,9 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
         ("AIR_HUMIDITY",  "AH", "Độ ẩm không khí"),
     };
 
+    /// <summary>Thời gian giả lập chờ mạng khi đồng bộ (mô phỏng độ trễ của máy chủ).</summary>
+    public static readonly TimeSpan SimulatedLatency = TimeSpan.FromSeconds(1.5);
+
     private readonly List<Zone> _zones = new();
     private readonly List<Esp32Node> _nodes = new();
     private readonly List<SensorType> _sensorTypes = new();
@@ -32,6 +35,7 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
 
     // Cảm biến đã bị gỡ trong lúc chạy: giữ nguyên giá trị đo cuối cùng, không tạo giá trị mới.
     private readonly HashSet<string> _frozenSensorIds = new();
+
     private Dictionary<string, Measurement> _latest = new();
     private long _measurementId;
 
@@ -46,16 +50,11 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
     public IReadOnlyList<Sensor> GetSensors() => _sensors;
     public IReadOnlyDictionary<string, Measurement> GetLatestMeasurements() => _latest;
 
-    /// <summary>Thời gian giả lập chờ mạng khi đồng bộ (mô phỏng độ trễ của máy chủ).</summary>
-    public static readonly TimeSpan SimulatedLatency = TimeSpan.FromSeconds(1.5);
-
     public string SourceName => "Dữ liệu mô phỏng";
 
     public bool IsSimulated => true;
 
     // ===== Công cụ thử nghiệm (ISimulationControls) =====
-
-    public bool SimulateSyncError { get; set; }
 
     public bool SimulateDisconnected { get; set; }
 
@@ -63,169 +62,6 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
     {
         foreach (Measurement m in _latest.Values)
             m.MeasuredAt -= span;
-    }
-
-    public async Task RefreshAsync(CancellationToken cancellationToken)
-    {
-        if (SimulateDisconnected)
-        {
-            // Không có phản hồi từ "máy chủ": chờ cho tới khi bị hủy (hết thời gian chờ).
-            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-        }
-
-        // Giả lập độ trễ khi lấy dữ liệu. Không chặn giao diện.
-        await Task.Delay(SimulatedLatency, cancellationToken);
-
-        if (SimulateSyncError)
-            throw new InvalidOperationException("Máy chủ trả về lỗi (mô phỏng)");
-
-        // Chỉ thay dữ liệu SAU KHI "tải" thành công.
-        // Đoạn này chạy trên luồng giao diện nên không cần khóa.
-        RefreshCore();
-    }
-
-    /// <summary>Tạo lại giá trị đo mô phỏng theo thời điểm hiện tại. Không đụng tới cấu hình.</summary>
-    private void RefreshCore()
-    {
-        DateTime now = DateTime.UtcNow;
-        var newLatest = new Dictionary<string, Measurement>();
-
-        foreach (Sensor sensor in _sensors)
-        {
-            // Cảm biến đã gỡ: giữ lại bản ghi đo cuối cùng (lịch sử), không tạo bản ghi mới
-            if (_frozenSensorIds.Contains(sensor.Id))
-            {
-                if (_latest.TryGetValue(sensor.Id, out Measurement? last))
-                    newLatest[sensor.Id] = last;
-                continue;
-            }
-
-            // Cảm biến không có kịch bản (ví dụ cảm biến người dùng thêm sau này) thì chưa có dữ liệu.
-            if (!_seeds.TryGetValue(sensor.Id, out SeedInfo? seed)) continue;
-
-            Measurement? m = CreateMeasurement(sensor.Id, seed, now);
-            if (m != null) newLatest[sensor.Id] = m;
-        }
-
-        _latest = newLatest;
-    }
-
-    public void AddZone(Zone zone)
-    {
-        if (_zones.Any(z => z.Code == zone.Code))
-            throw new InvalidOperationException($"Mã khu vực {zone.Code} đã tồn tại.");
-        if (_zones.Count >= Zone.MaxZones)
-            throw new InvalidOperationException($"Đã đủ {Zone.MaxZones} khu vực, không thể thêm.");
-
-        _zones.Add(zone);
-    }
-
-    public void UpdateZone(Zone zone)
-    {
-        Zone? existing = _zones.FirstOrDefault(z => z.Code == zone.Code);
-        if (existing == null)
-            throw new InvalidOperationException($"Không tìm thấy khu vực {zone.Code}.");
-
-        existing.Name = zone.Name;
-        existing.Description = zone.Description;
-        existing.IsActive = zone.IsActive;
-    }
-    public void AddSensor(Sensor sensor)
-    {
-        if (_sensors.Any(s => string.Equals(s.Id, sensor.Id, StringComparison.OrdinalIgnoreCase)))
-            throw new InvalidOperationException($"Mã cảm biến {sensor.Id} đã tồn tại.");
-
-        // Không đăng ký kịch bản dữ liệu mô phỏng (_seeds) cho cảm biến mới:
-        // nó sẽ hiện "Chưa có dữ liệu" cho tới khi có nguồn dữ liệu thật.
-        _sensors.Add(sensor);
-    }
-    public void UpdateSensor(Sensor sensor)
-    {
-        Sensor? existing = _sensors.FirstOrDefault(s => s.Id == sensor.Id);
-        if (existing == null)
-            throw new InvalidOperationException($"Không tìm thấy cảm biến {sensor.Id}.");
-
-        existing.Name = sensor.Name;
-        existing.SensorTypeId = sensor.SensorTypeId;
-        existing.ZoneCode = sensor.ZoneCode;
-        existing.NodeId = sensor.NodeId;
-        existing.Unit = sensor.Unit;
-        existing.Status = sensor.Status;
-        existing.Notes = sensor.Notes;
-        // Không đổi InstalledAt, RemovedAt, RemovalReason, ReplacedBySensorId (thuộc về lịch sử).
-    }
-    public void RemoveSensor(string sensorId, DateTime removedAtUtc, string? replacedBySensorId)
-    {
-        Sensor? existing = _sensors.FirstOrDefault(s => s.Id == sensorId);
-        if (existing == null)
-            throw new InvalidOperationException($"Không tìm thấy cảm biến {sensorId}.");
-        if (existing.Status == SensorStatus.Removed)
-            throw new InvalidOperationException($"Cảm biến {sensorId} đã được gỡ trước đó.");
-
-        // Chỉ đánh dấu, KHÔNG xóa khỏi danh sách (giữ lịch sử)
-        existing.Status = SensorStatus.Removed;
-        existing.RemovedAt = removedAtUtc;
-        existing.RemovalReason = null;
-        existing.ReplacedBySensorId = replacedBySensorId;
-
-        _frozenSensorIds.Add(sensorId);
-    }
-
-    public void RestoreSensor(string sensorId, string historyNote)
-    {
-        Sensor? existing = _sensors.FirstOrDefault(s => s.Id == sensorId);
-        if (existing == null)
-            throw new InvalidOperationException($"Không tìm thấy cảm biến {sensorId}.");
-        if (existing.Status != SensorStatus.Removed)
-            throw new InvalidOperationException($"Cảm biến {sensorId} chưa bị gỡ.");
-
-        existing.Status = SensorStatus.Active;
-        existing.RemovedAt = null;
-        existing.RemovalReason = null;
-        existing.ReplacedBySensorId = null;
-        existing.Notes = string.IsNullOrWhiteSpace(existing.Notes)
-            ? historyNote
-            : $"{existing.Notes}. {historyNote}";
-
-        // Cho phép tạo lại giá trị đo mô phỏng ở lần Làm mới tiếp theo
-        _frozenSensorIds.Remove(sensorId);
-    }
-
-    public void AddNode(Esp32Node node)
-    {
-        if (_nodes.Any(n => string.Equals(n.Id, node.Id, StringComparison.OrdinalIgnoreCase)))
-            throw new InvalidOperationException($"Mã ESP32 {node.Id} đã tồn tại.");
-
-        _nodes.Add(node);
-    }
-
-    public void UpdateNode(Esp32Node node)
-    {
-        Esp32Node? existing = _nodes.FirstOrDefault(n => n.Id == node.Id);
-        if (existing == null)
-            throw new InvalidOperationException($"Không tìm thấy ESP32 {node.Id}.");
-
-        existing.Name = node.Name;
-        existing.Notes = node.Notes;
-        existing.IsActive = node.IsActive;
-    }
-    // ===== Dữ liệu mẫu mở rộng cho kiểm thử (ISimulationControls) =====
-
-    /// <summary>Xóa toàn bộ và dựng lại dữ liệu mẫu ban đầu (48 khu vực, 16 ESP32).</summary>
-    private void BuildAll()
-    {
-        _zones.Clear();
-        _nodes.Clear();
-        _sensorTypes.Clear();
-        _sensors.Clear();
-        _seeds.Clear();
-        _frozenSensorIds.Clear();
-        _latest = new Dictionary<string, Measurement>();
-
-        BuildSensorTypes();
-        BuildNodes();
-        BuildZonesAndSensors(DateTime.UtcNow);
-        RefreshCore();
     }
 
     public void ResetSampleData()
@@ -262,86 +98,217 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
         }
     }
 
-    /// <summary>
-    /// Dựng một khu vực mẫu cho các ô E01..L12. Tình huống chọn theo zoneIndex (cố định, không ngẫu nhiên):
-    ///  - zoneIndex % 17 == 3  : chưa có cảm biến (Chưa cấu hình)
-    ///  - zoneIndex % 19 == 5  : ngừng sử dụng
-    ///  - zoneIndex % 13 == 4  : mọi cảm biến có dữ liệu cũ (Mất kết nối)
-    ///  - zoneIndex % 29 == 11 : mọi cảm biến chưa có dữ liệu (Mất kết nối)
-    ///  - zoneIndex % 20 == 7  : 12 cảm biến (mỗi loại 3 cảm biến)
-    ///  - Với khu vực dữ liệu mới: % 11 == 2 có 1 bản ghi lỗi; % 9 == 6 có 1 cảm biến dữ liệu cũ;
-    ///    % 23 == 0 có 1 cảm biến "Có lỗi".
-    /// </summary>
-    private void BuildExtraZone(int row, int col, int zoneIndex, DateTime now)
+    // ===== Đồng bộ =====
+
+    public async Task RefreshAsync(CancellationToken cancellationToken)
     {
-        string code = FarmOverviewService.MakeCode(row, col);
-
-        var zone = new Zone
+        if (SimulateDisconnected)
         {
-            Code = code,
-            Row = row,
-            Column = col,
-            Name = $"Khu vực {code}",
-            Description = "Khu vực mô phỏng",
-            IsActive = zoneIndex % 19 != 5
-        };
-        _zones.Add(zone);
+            // Không có phản hồi từ "máy chủ": chờ cho tới khi bị hủy (hết thời gian chờ).
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
 
-        if (zoneIndex % 17 == 3) return;   // chưa có cảm biến
+        // Giả lập độ trễ khi lấy dữ liệu. Không chặn giao diện.
+        await Task.Delay(SimulatedLatency, cancellationToken);
 
-        int nodeNumber = zoneIndex / 3 + 1;
-        string nodeId = $"ESP-{nodeNumber:00}";
-        EnsureNode(nodeId, nodeNumber, now);
+        // Chỉ thay dữ liệu SAU KHI "tải" thành công.
+        // Đoạn này chạy trên luồng giao diện nên không cần khóa.
+        RefreshCore();
+    }
 
-        Feed baseFeed = Feed.Fresh;
-        if (zoneIndex % 13 == 4) baseFeed = Feed.Stale;
-        else if (zoneIndex % 29 == 11) baseFeed = Feed.None;
+    /// <summary>Tạo lại giá trị đo mô phỏng theo thời điểm hiện tại. Không đụng tới cấu hình.</summary>
+    private void RefreshCore()
+    {
+        DateTime now = DateTime.UtcNow;
+        var newLatest = new Dictionary<string, Measurement>();
 
-        int copies = zoneIndex % 20 == 7 ? 3 : 1;   // 3 cảm biến mỗi loại = 12 cảm biến
-
-        for (int kind = 0; kind < PerZoneKinds.Length; kind++)
+        foreach (Sensor sensor in _sensors)
         {
-            for (int serial = 1; serial <= copies; serial++)
+            // Cảm biến đã gỡ: giữ lại bản ghi đo cuối cùng (lịch sử), không tạo bản ghi mới
+            if (_frozenSensorIds.Contains(sensor.Id))
             {
-                var status = SensorStatus.Active;
-                Feed feed = baseFeed;
-
-                // Tình huống riêng của từng cảm biến, chỉ áp dụng cho khu vực có dữ liệu mới
-                if (baseFeed == Feed.Fresh && serial == 1)
-                {
-                    if (kind == 2 && zoneIndex % 11 == 2) feed = Feed.Error;
-                    else if (kind == 3 && zoneIndex % 9 == 6) feed = Feed.Stale;
-                    else if (kind == 1 && zoneIndex % 23 == 0) { status = SensorStatus.Faulty; feed = Feed.Error; }
-                }
-
-                Sensor sensor = AddSensor(zone, nodeId, kind, zoneIndex, serial, status, feed, now);
-                if (copies > 1) sensor.Name += $" ({serial})";
+                if (_latest.TryGetValue(sensor.Id, out Measurement? last))
+                    newLatest[sensor.Id] = last;
+                continue;
             }
+
+            // Cảm biến không có kịch bản (ví dụ cảm biến người dùng thêm sau này) thì chưa có dữ liệu.
+            if (!_seeds.TryGetValue(sensor.Id, out SeedInfo? seed)) continue;
+
+            Measurement? m = CreateMeasurement(sensor.Id, seed, now);
+            if (m != null) newLatest[sensor.Id] = m;
         }
+
+        _latest = newLatest;
     }
 
-    /// <summary>Đảm bảo ESP32 có tồn tại (và đang hoạt động) trước khi gán cảm biến cho nó.</summary>
-    private void EnsureNode(string nodeId, int number, DateTime now)
+    // ===== Khu vực =====
+
+    public void AddZone(Zone zone)
     {
-        Esp32Node? node = _nodes.FirstOrDefault(
-            n => string.Equals(n.Id, nodeId, StringComparison.OrdinalIgnoreCase));
+        if (_zones.Any(z => z.Code == zone.Code))
+            throw new InvalidOperationException($"Mã khu vực {zone.Code} đã tồn tại.");
+        if (_zones.Count >= Zone.MaxZones)
+            throw new InvalidOperationException($"Đã đủ {Zone.MaxZones} khu vực, không thể thêm.");
 
-        if (node == null)
-        {
-            _nodes.Add(new Esp32Node
-            {
-                Id = nodeId,
-                Name = $"ESP32 số {number}",
-                Notes = "Dữ liệu mô phỏng",
-                CreatedAt = now.AddDays(-30)
-            });
-        }
-        else
-        {
-            node.IsActive = true;
-        }
+        _zones.Add(zone);
     }
+
+    public void UpdateZone(Zone zone)
+    {
+        Zone? existing = _zones.FirstOrDefault(z => z.Code == zone.Code);
+        if (existing == null)
+            throw new InvalidOperationException($"Không tìm thấy khu vực {zone.Code}.");
+
+        existing.Name = zone.Name;
+        existing.Description = zone.Description;
+    }
+
+    public void DeleteZone(string zoneCode)
+    {
+        Zone? existing = _zones.FirstOrDefault(z => z.Code == zoneCode);
+        if (existing == null)
+            throw new InvalidOperationException($"Không tìm thấy khu vực {zoneCode}.");
+        if (_sensors.Any(s => s.ZoneCode == zoneCode))
+            throw new InvalidOperationException($"Khu vực {zoneCode} còn cảm biến, cần xóa cảm biến trước.");
+
+        _zones.Remove(existing);
+    }
+
+    // ===== Cảm biến =====
+
+    public void AddSensor(Sensor sensor)
+    {
+        if (_sensors.Any(s => string.Equals(s.Id, sensor.Id, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException($"Mã cảm biến {sensor.Id} đã tồn tại.");
+
+        // Không đăng ký kịch bản dữ liệu mô phỏng (_seeds) cho cảm biến mới:
+        // nó sẽ hiện "Chưa có dữ liệu" cho tới khi có nguồn dữ liệu thật.
+        _sensors.Add(sensor);
+    }
+
+    public void UpdateSensor(Sensor sensor)
+    {
+        Sensor? existing = _sensors.FirstOrDefault(s => s.Id == sensor.Id);
+        if (existing == null)
+            throw new InvalidOperationException($"Không tìm thấy cảm biến {sensor.Id}.");
+
+        existing.Name = sensor.Name;
+        existing.SensorTypeId = sensor.SensorTypeId;
+        existing.ZoneCode = sensor.ZoneCode;
+        existing.NodeId = sensor.NodeId;
+        existing.Unit = sensor.Unit;
+        existing.Status = sensor.Status;
+        existing.Notes = sensor.Notes;
+        // Không đổi InstalledAt, RemovedAt, RemovalReason, ReplacedBySensorId, RemovedWithNodeId (thuộc về lịch sử).
+    }
+
+    public void RemoveSensor(string sensorId, DateTime removedAtUtc, string? replacedBySensorId,
+                             string? removedWithNodeId = null)
+    {
+        Sensor? existing = _sensors.FirstOrDefault(s => s.Id == sensorId);
+        if (existing == null)
+            throw new InvalidOperationException($"Không tìm thấy cảm biến {sensorId}.");
+        if (existing.Status == SensorStatus.Removed)
+            throw new InvalidOperationException($"Cảm biến {sensorId} đã được gỡ trước đó.");
+
+        // Chỉ đánh dấu, chưa xóa khỏi danh sách
+        existing.Status = SensorStatus.Removed;
+        existing.RemovedAt = removedAtUtc;
+        existing.RemovalReason = removedWithNodeId == null ? null : $"Ngừng sử dụng ESP32 {removedWithNodeId}";
+        existing.ReplacedBySensorId = replacedBySensorId;
+        existing.RemovedWithNodeId = removedWithNodeId;
+
+        _frozenSensorIds.Add(sensorId);
+    }
+
+    public void RestoreSensor(string sensorId, string historyNote)
+    {
+        Sensor? existing = _sensors.FirstOrDefault(s => s.Id == sensorId);
+        if (existing == null)
+            throw new InvalidOperationException($"Không tìm thấy cảm biến {sensorId}.");
+        if (existing.Status != SensorStatus.Removed)
+            throw new InvalidOperationException($"Cảm biến {sensorId} chưa bị gỡ.");
+
+        existing.Status = SensorStatus.Active;
+        existing.RemovedAt = null;
+        existing.RemovalReason = null;
+        existing.ReplacedBySensorId = null;
+        existing.RemovedWithNodeId = null;
+        existing.Notes = string.IsNullOrWhiteSpace(existing.Notes)
+            ? historyNote
+            : $"{existing.Notes}. {historyNote}";
+
+        // Cho phép tạo lại giá trị đo mô phỏng ở lần làm mới tiếp theo
+        _frozenSensorIds.Remove(sensorId);
+    }
+
+    public void DeleteSensor(string sensorId)
+    {
+        Sensor? existing = _sensors.FirstOrDefault(s => s.Id == sensorId);
+        if (existing == null)
+            throw new InvalidOperationException($"Không tìm thấy cảm biến {sensorId}.");
+
+        _sensors.Remove(existing);
+        _seeds.Remove(sensorId);
+        _frozenSensorIds.Remove(sensorId);
+        _latest.Remove(sensorId);
+
+        // Cảm biến khác từng ghi "được thay bằng cảm biến này" thì bỏ liên kết (không còn tồn tại)
+        foreach (Sensor other in _sensors.Where(s => s.ReplacedBySensorId == sensorId))
+            other.ReplacedBySensorId = null;
+    }
+
+    // ===== ESP32 =====
+
+    public void AddNode(Esp32Node node)
+    {
+        if (_nodes.Any(n => string.Equals(n.Id, node.Id, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException($"Mã ESP32 {node.Id} đã tồn tại.");
+
+        _nodes.Add(node);
+    }
+
+    public void UpdateNode(Esp32Node node)
+    {
+        Esp32Node? existing = _nodes.FirstOrDefault(n => n.Id == node.Id);
+        if (existing == null)
+            throw new InvalidOperationException($"Không tìm thấy ESP32 {node.Id}.");
+
+        existing.Name = node.Name;
+        existing.Notes = node.Notes;
+        existing.IsActive = node.IsActive;
+    }
+
+    public void DeleteNode(string nodeId)
+    {
+        Esp32Node? existing = _nodes.FirstOrDefault(n => n.Id == nodeId);
+        if (existing == null)
+            throw new InvalidOperationException($"Không tìm thấy ESP32 {nodeId}.");
+        if (_sensors.Any(s => s.NodeId == nodeId))
+            throw new InvalidOperationException($"ESP32 {nodeId} còn cảm biến, cần xóa cảm biến trước.");
+
+        _nodes.Remove(existing);
+    }
+
     // ===== Dựng dữ liệu mẫu =====
+
+    /// <summary>Xóa toàn bộ và dựng lại dữ liệu mẫu ban đầu (48 khu vực, 16 ESP32).</summary>
+    private void BuildAll()
+    {
+        _zones.Clear();
+        _nodes.Clear();
+        _sensorTypes.Clear();
+        _sensors.Clear();
+        _seeds.Clear();
+        _frozenSensorIds.Clear();
+        _latest = new Dictionary<string, Measurement>();
+
+        BuildSensorTypes();
+        BuildNodes();
+        BuildZonesAndSensors(DateTime.UtcNow);
+        RefreshCore();
+    }
 
     private void BuildSensorTypes()
     {
@@ -397,8 +364,7 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
                     Row = row,
                     Column = col,
                     Name = $"Khu vực {code}",
-                    Description = "Khu vực mô phỏng",
-                    IsActive = code != "D04"        // D04: ngừng sử dụng
+                    Description = "Khu vực mô phỏng"
                 };
                 _zones.Add(zone);
 
@@ -436,15 +402,101 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
         }
     }
 
+    /// <summary>
+    /// Dựng một khu vực mẫu cho các ô E01..L12. Tình huống chọn theo zoneIndex (cố định, không ngẫu nhiên):
+    ///  - zoneIndex % 17 == 3  : chưa có cảm biến (Chưa cấu hình)
+    ///  - zoneIndex % 13 == 4  : mọi cảm biến có dữ liệu cũ (Mất kết nối)
+    ///  - zoneIndex % 29 == 11 : mọi cảm biến chưa có dữ liệu (Mất kết nối)
+    ///  - zoneIndex % 20 == 7  : 12 cảm biến (mỗi loại 3 cảm biến)
+    ///  - Với khu vực dữ liệu mới: % 11 == 2 có 1 bản ghi lỗi; % 9 == 6 có 1 cảm biến dữ liệu cũ;
+    ///    % 23 == 0 có 1 cảm biến "Có lỗi".
+    /// </summary>
+    private void BuildExtraZone(int row, int col, int zoneIndex, DateTime now)
+    {
+        string code = FarmOverviewService.MakeCode(row, col);
+
+        var zone = new Zone
+        {
+            Code = code,
+            Row = row,
+            Column = col,
+            Name = $"Khu vực {code}",
+            Description = "Khu vực mô phỏng"
+        };
+        _zones.Add(zone);
+
+        if (zoneIndex % 17 == 3) return;   // chưa có cảm biến
+
+        int nodeNumber = zoneIndex / 3 + 1;
+        string nodeId = $"ESP-{nodeNumber:00}";
+        EnsureNode(nodeId, nodeNumber, now);
+
+        Feed baseFeed = Feed.Fresh;
+        if (zoneIndex % 13 == 4) baseFeed = Feed.Stale;
+        else if (zoneIndex % 29 == 11) baseFeed = Feed.None;
+
+        int copies = zoneIndex % 20 == 7 ? 3 : 1;   // 3 cảm biến mỗi loại = 12 cảm biến
+
+        for (int kind = 0; kind < PerZoneKinds.Length; kind++)
+        {
+            for (int serial = 1; serial <= copies; serial++)
+            {
+                var status = SensorStatus.Active;
+                Feed feed = baseFeed;
+
+                // Tình huống riêng của từng cảm biến, chỉ áp dụng cho khu vực có dữ liệu mới
+                if (baseFeed == Feed.Fresh && serial == 1)
+                {
+                    if (kind == 2 && zoneIndex % 11 == 2) feed = Feed.Error;
+                    else if (kind == 3 && zoneIndex % 9 == 6) feed = Feed.Stale;
+                    else if (kind == 1 && zoneIndex % 23 == 0) { status = SensorStatus.Faulty; feed = Feed.Error; }
+                }
+
+                Sensor sensor = AddSensor(zone, nodeId, kind, zoneIndex, serial, status, feed, now);
+                if (copies > 1) sensor.Name += $" ({serial})";
+            }
+        }
+    }
+
+    /// <summary>
+    /// Đảm bảo ESP32 tồn tại và đang hoạt động trước khi gán cảm biến mẫu cho nó
+    /// (ESP32 đang ngừng sử dụng sẽ được bật lại, nhưng không tự khôi phục các cảm biến đã gỡ cùng).
+    /// </summary>
+    private void EnsureNode(string nodeId, int number, DateTime now)
+    {
+        Esp32Node? node = _nodes.FirstOrDefault(
+            n => string.Equals(n.Id, nodeId, StringComparison.OrdinalIgnoreCase));
+
+        if (node == null)
+        {
+            _nodes.Add(new Esp32Node
+            {
+                Id = nodeId,
+                Name = $"ESP32 số {number}",
+                Notes = "Dữ liệu mô phỏng",
+                CreatedAt = now.AddDays(-30)
+            });
+        }
+        else
+        {
+            node.IsActive = true;
+        }
+    }
+
     private Sensor AddSensor(Zone zone, string nodeId, int kind, int zoneIndex, int serial,
                              SensorStatus status, Feed feed, DateTime now)
     {
         var (typeId, abbr, label) = PerZoneKinds[kind];
         SensorType type = _sensorTypes.First(t => t.Id == typeId);
 
+        // Tránh trùng mã với cảm biến người dùng đã tự tạo
+        string id = $"{zone.Code}-{abbr}-{serial:00}";
+        while (_sensors.Any(s => string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase)))
+            id += "X";
+
         var sensor = new Sensor
         {
-            Id = $"{zone.Code}-{abbr}-{serial:00}",
+            Id = id,
             Name = $"{label} {zone.Code}",
             SensorTypeId = typeId,
             ZoneCode = zone.Code,
@@ -455,7 +507,7 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
             InstalledAt = now.AddDays(-30)
         };
         _sensors.Add(sensor);
-        _seeds[sensor.Id] = new SeedInfo(feed, kind, zoneIndex);   // giá trị đo được tạo trong Refresh()
+        _seeds[sensor.Id] = new SeedInfo(feed, kind, zoneIndex);   // giá trị đo được tạo trong RefreshCore()
         return sensor;
     }
 
