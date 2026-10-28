@@ -4,7 +4,7 @@ namespace QuanLyTuoiTieu.ViewModels;
 
 /// <summary>
 /// Một thẻ cảm biến trong cửa sổ chi tiết khu vực (mỗi loại cảm biến một thẻ).
-/// Thẻ sáng: cảm biến đang quản lý và đã có dữ liệu. Thẻ mờ: còn lại.
+/// Thẻ sáng: có cảm biến đang quản lý (kể cả chưa gửi dữ liệu). Thẻ mờ: chưa kết nối, đã gỡ, ESP32 ngừng.
 /// </summary>
 public class SensorTile
 {
@@ -13,10 +13,10 @@ public class SensorTile
 
     public string TypeName { get; init; } = "";
 
-    /// <summary>true = thẻ sáng (đã kết nối, hiện thông số). false = thẻ mờ.</summary>
+    /// <summary>true = thẻ sáng. false = thẻ mờ.</summary>
     public bool IsLit { get; init; }
 
-    /// <summary>Giá trị hiển thị: số đo, "Lỗi", hoặc "≈ số" khi là giá trị ước tính.</summary>
+    /// <summary>Giá trị hiển thị: số đo, "—" (chưa có dữ liệu) hoặc "Lỗi".</summary>
     public string ValueText { get; init; } = "—";
     public string UnitText { get; init; } = "";
 
@@ -32,15 +32,8 @@ public class SensorTile
     /// <summary>Dòng nhỏ cuối thẻ: ESP32 phụ trách, lý do lỗi.</summary>
     public string FooterText { get; init; } = "";
 
-    /// <summary>
-    /// Thông báo thêm: giá trị này là ước tính từ khu vực lân cận, hoặc vì sao chưa ước tính được.
-    /// </summary>
-    public string NoticeText { get; init; } = "";
-
-    public bool HasNotice => !string.IsNullOrEmpty(NoticeText);
-
-    /// <summary>true = giá trị hiển thị là ƯỚC TÍNH, không phải số đo thật.</summary>
-    public bool IsEstimated { get; init; }
+    /// <summary>true = đang hiển thị giá trị hợp lệ CUỐI CÙNG (dữ liệu cũ) vì bản ghi mới nhất bị lỗi.</summary>
+    public bool IsOldValue { get; init; }
 
     public string TooltipText { get; init; } = "";
 

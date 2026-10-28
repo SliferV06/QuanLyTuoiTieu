@@ -23,4 +23,7 @@ public class ZoneDetail
 
     /// <summary>Mỗi loại cảm biến một thẻ (sáng hoặc mờ).</summary>
     public IReadOnlyList<SensorTile> Tiles { get; init; } = Array.Empty<SensorTile>();
+
+    /// <summary>Vị trí cụm cảm biến, mốc lắp đặt và khoảng lệch.</summary>
+    public ZonePositionInfo Position { get; init; } = new();
 }

@@ -27,6 +27,20 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
     /// <summary>Thời gian giả lập chờ mạng khi đồng bộ (mô phỏng độ trễ của máy chủ).</summary>
     public static readonly TimeSpan SimulatedLatency = TimeSpan.FromSeconds(1.5);
 
+    // ===== Tọa độ MÔ PHỎNG (giả): sửa hai hằng số gốc nếu muốn dùng điểm thật của trang trại =====
+    // Điểm gốc (0, 0) nằm giữa biển nên bản đồ sẽ hiện rõ đây là vị trí giả.
+
+    /// <summary>Vĩ độ của khu vực A01 (độ).</summary>
+    public const double SimulatedOriginLatitude = 0.0;
+
+    /// <summary>Kinh độ của khu vực A01 (độ).</summary>
+    public const double SimulatedOriginLongitude = 0.0;
+
+    /// <summary>Khoảng cách giữa hai khu vực kề nhau (mét). Hàng tăng dần về phía nam, cột về phía đông.</summary>
+    public const double SimulatedSpacingMeters = 20.0;
+
+    private const double MetersPerDegree = 111_320.0;
+
     private readonly List<Zone> _zones = new();
     private readonly List<Esp32Node> _nodes = new();
     private readonly List<SensorType> _sensorTypes = new();
@@ -36,7 +50,13 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
     // Cảm biến đã bị gỡ trong lúc chạy: giữ nguyên giá trị đo cuối cùng, không tạo giá trị mới.
     private readonly HashSet<string> _frozenSensorIds = new();
 
+    // Mốc lắp đặt và độ dịch chuyển giả lập của từng khu vực (khóa = mã khu vực)
+    private readonly Dictionary<string, GpsPosition> _homes = new();
+    private readonly Dictionary<string, (double North, double East)> _moveOffsets = new();
+    private readonly Dictionary<string, DateTime> _moveTimes = new();
+
     private Dictionary<string, Measurement> _latest = new();
+    private Dictionary<string, Measurement> _lastValid = new();
     private long _measurementId;
 
     public MockFarmDataSource()
@@ -49,6 +69,7 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
     public IReadOnlyList<SensorType> GetSensorTypes() => _sensorTypes;
     public IReadOnlyList<Sensor> GetSensors() => _sensors;
     public IReadOnlyDictionary<string, Measurement> GetLatestMeasurements() => _latest;
+    public IReadOnlyDictionary<string, Measurement> GetLastValidMeasurements() => _lastValid;
 
     public string SourceName => "Dữ liệu mô phỏng";
 
@@ -60,7 +81,8 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
 
     public void AgeMeasurements(TimeSpan span)
     {
-        foreach (Measurement m in _latest.Values)
+        // Một số bản ghi vừa là "mới nhất" vừa là "hợp lệ gần nhất": Distinct() để chỉ làm già một lần
+        foreach (Measurement m in _latest.Values.Concat(_lastValid.Values).Distinct())
             m.MeasuredAt -= span;
     }
 
@@ -94,8 +116,7 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
         if (existing != null)
         {
             _seeds[existing.Id] = new SeedInfo(Feed.Fresh, kind, zoneIndex);
-            Measurement? measurement = CreateMeasurement(existing.Id, _seeds[existing.Id], now);
-            if (measurement != null) _latest[existing.Id] = measurement;
+            StoreMeasurements(existing.Id, now);
             return null;
         }
 
@@ -143,9 +164,7 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
         };
         _sensors.Add(sensor);
         _seeds[id] = new SeedInfo(Feed.Fresh, kind, zoneIndex);
-
-        Measurement? first = CreateMeasurement(id, _seeds[id], now);
-        if (first != null) _latest[id] = first;
+        StoreMeasurements(id, now);
         return null;
     }
 
@@ -162,6 +181,7 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
 
         return null;
     }
+
     public void FillAllZones()
     {
         DateTime now = DateTime.UtcNow;
@@ -182,13 +202,15 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
 
         // Chỉ tạo giá trị đo cho cảm biến MỚI, không đụng tới dữ liệu đang có
         for (int i = sensorCountBefore; i < _sensors.Count; i++)
-        {
-            Sensor sensor = _sensors[i];
-            if (!_seeds.TryGetValue(sensor.Id, out SeedInfo? seed)) continue;
+            StoreMeasurements(_sensors[i].Id, now);
+    }
 
-            Measurement? m = CreateMeasurement(sensor.Id, seed, now);
-            if (m != null) _latest[sensor.Id] = m;
-        }
+    /// <summary>Giả lập cụm cảm biến của khu vực bị dịch chuyển (cộng dồn): thử cảnh báo di chuyển.</summary>
+    public void SimulateMove(string zoneCode, double northMeters, double eastMeters)
+    {
+        _moveOffsets.TryGetValue(zoneCode, out var offset);
+        _moveOffsets[zoneCode] = (offset.North + northMeters, offset.East + eastMeters);
+        _moveTimes[zoneCode] = DateTime.UtcNow;   // vị trí mới vừa được báo về
     }
 
     // ===== Đồng bộ =====
@@ -214,25 +236,92 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
     {
         DateTime now = DateTime.UtcNow;
         var newLatest = new Dictionary<string, Measurement>();
+        var newLastValid = new Dictionary<string, Measurement>();
 
         foreach (Sensor sensor in _sensors)
         {
             // Cảm biến đã gỡ: giữ lại bản ghi đo cuối cùng (lịch sử), không tạo bản ghi mới
             if (_frozenSensorIds.Contains(sensor.Id))
             {
-                if (_latest.TryGetValue(sensor.Id, out Measurement? last))
-                    newLatest[sensor.Id] = last;
+                if (_latest.TryGetValue(sensor.Id, out Measurement? last)) newLatest[sensor.Id] = last;
+                if (_lastValid.TryGetValue(sensor.Id, out Measurement? lastOk)) newLastValid[sensor.Id] = lastOk;
                 continue;
             }
 
-            // Cảm biến không có kịch bản (ví dụ cảm biến người dùng thêm sau này) thì chưa có dữ liệu.
+            // Cảm biến không có kịch bản thì chưa có dữ liệu.
             if (!_seeds.TryGetValue(sensor.Id, out SeedInfo? seed)) continue;
 
-            Measurement? m = CreateMeasurement(sensor.Id, seed, now);
-            if (m != null) newLatest[sensor.Id] = m;
+            var (latest, lastValid) = CreateMeasurements(sensor.Id, seed, now);
+            if (latest != null) newLatest[sensor.Id] = latest;
+            if (lastValid != null) newLastValid[sensor.Id] = lastValid;
         }
 
         _latest = newLatest;
+        _lastValid = newLastValid;
+    }
+
+    /// <summary>Tạo (hoặc tạo lại) bản ghi đo của một cảm biến có kịch bản và lưu vào dữ liệu hiện tại.</summary>
+    private void StoreMeasurements(string sensorId, DateTime now)
+    {
+        if (!_seeds.TryGetValue(sensorId, out SeedInfo? seed)) return;
+
+        var (latest, lastValid) = CreateMeasurements(sensorId, seed, now);
+        if (latest != null) _latest[sensorId] = latest;
+        if (lastValid != null) _lastValid[sensorId] = lastValid;
+    }
+
+    // ===== Vị trí GPS mô phỏng =====
+
+    /// <summary>
+    /// Mỗi khu vực có vị trí khi cụm cảm biến của nó đã từng gửi dữ liệu. Giờ báo vị trí = giờ đo mới nhất
+    /// (hoặc giờ dịch chuyển giả lập nếu muộn hơn), nên khu vực mất kết nối vẫn giữ "vị trí cuối cùng".
+    /// </summary>
+    public IReadOnlyDictionary<string, GpsPosition> GetZonePositions()
+    {
+        var latestByZone = new Dictionary<string, DateTime>();
+        foreach (Sensor sensor in _sensors)
+        {
+            if (!_latest.TryGetValue(sensor.Id, out Measurement? m)) continue;
+
+            if (!latestByZone.TryGetValue(sensor.ZoneCode, out DateTime known) || m.MeasuredAt > known)
+                latestByZone[sensor.ZoneCode] = m.MeasuredAt;
+        }
+
+        var result = new Dictionary<string, GpsPosition>();
+        foreach (Zone zone in _zones)
+        {
+            if (!latestByZone.TryGetValue(zone.Code, out DateTime reportedAt)) continue;
+
+            _moveOffsets.TryGetValue(zone.Code, out var offset);
+            if (_moveTimes.TryGetValue(zone.Code, out DateTime movedAt) && movedAt > reportedAt)
+                reportedAt = movedAt;
+
+            result[zone.Code] = ToPosition(zone, offset.North, offset.East, reportedAt);
+        }
+        return result;
+    }
+
+    public IReadOnlyDictionary<string, GpsPosition> GetZoneHomes() => _homes;
+
+    public void SetZoneHome(string zoneCode, GpsPosition home)
+    {
+        if (!_zones.Any(z => z.Code == zoneCode))
+            throw new InvalidOperationException($"Không tìm thấy khu vực {zoneCode}.");
+
+        _homes[zoneCode] = home;
+    }
+
+    /// <summary>Tọa độ giả của cụm cảm biến: lưới từ điểm gốc, cộng độ dịch chuyển giả lập (mét).</summary>
+    private static GpsPosition ToPosition(Zone zone, double northMeters, double eastMeters, DateTime reportedAtUtc)
+    {
+        double southOfOrigin = (zone.Row - 1) * SimulatedSpacingMeters;           // hàng tăng dần về phía nam
+        double eastOfOrigin = (zone.Column - 1) * SimulatedSpacingMeters + eastMeters;
+
+        double latitude = SimulatedOriginLatitude + (northMeters - southOfOrigin) / MetersPerDegree;
+        double longitude = SimulatedOriginLongitude
+                           + eastOfOrigin / (MetersPerDegree * Math.Cos(SimulatedOriginLatitude * Math.PI / 180.0));
+
+        return new GpsPosition(latitude, longitude, reportedAtUtc);
     }
 
     // ===== Khu vực =====
@@ -266,6 +355,9 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
             throw new InvalidOperationException($"Khu vực {zoneCode} còn cảm biến, cần xóa cảm biến trước.");
 
         _zones.Remove(existing);
+        _homes.Remove(zoneCode);
+        _moveOffsets.Remove(zoneCode);
+        _moveTimes.Remove(zoneCode);
     }
 
     // ===== Cảm biến =====
@@ -346,6 +438,7 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
         _seeds.Remove(sensorId);
         _frozenSensorIds.Remove(sensorId);
         _latest.Remove(sensorId);
+        _lastValid.Remove(sensorId);
 
         // Cảm biến khác từng ghi "được thay bằng cảm biến này" thì bỏ liên kết (không còn tồn tại)
         foreach (Sensor other in _sensors.Where(s => s.ReplacedBySensorId == sensorId))
@@ -395,7 +488,11 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
         _sensors.Clear();
         _seeds.Clear();
         _frozenSensorIds.Clear();
+        _homes.Clear();
+        _moveOffsets.Clear();
+        _moveTimes.Clear();
         _latest = new Dictionary<string, Measurement>();
+        _lastValid = new Dictionary<string, Measurement>();
 
         BuildSensorTypes();
         BuildNodes();
@@ -487,7 +584,7 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
                     else if (code == "B03" && k == 2) { feed = Feed.Error; }                          // bản ghi lỗi
                     else if (code == "B09" && k == 3) { feed = Feed.Stale; }                          // một phần dữ liệu cũ
                     else if (code is "C02" or "C03") { feed = Feed.Stale; }                           // mất kết nối (dữ liệu cũ)
-                    else if (code == "C10") { feed = Feed.None; }                                     // chưa có dữ liệu
+                    else if (code == "C10") { feed = Feed.None; }                                     // đăng ký nhưng chưa có dữ liệu
 
                     AddSensor(zone, nodeId, k, zoneIndex, 1, status, feed, now);
                 }
@@ -495,15 +592,6 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
         }
     }
 
-    /// <summary>
-    /// Dựng một khu vực mẫu cho các ô E01..L12. Tình huống chọn theo zoneIndex (cố định, không ngẫu nhiên):
-    ///  - zoneIndex % 17 == 3  : chưa có cảm biến (Chưa cấu hình)
-    ///  - zoneIndex % 13 == 4  : mọi cảm biến có dữ liệu cũ (Mất kết nối)
-    ///  - zoneIndex % 29 == 11 : mọi cảm biến chưa có dữ liệu (Mất kết nối)
-    ///  - zoneIndex % 20 == 7  : 12 cảm biến (mỗi loại 3 cảm biến)
-    ///  - Với khu vực dữ liệu mới: % 11 == 2 có 1 bản ghi lỗi; % 9 == 6 có 1 cảm biến dữ liệu cũ;
-    ///    % 23 == 0 có 1 cảm biến "Có lỗi".
-    /// </summary>
     /// <summary>
     /// Dựng một khu vực mẫu cho các ô E01..L12. Tình huống chọn theo zoneIndex (cố định, không ngẫu nhiên):
     ///  - zoneIndex % 17 == 3  : chưa có cảm biến (Chưa cấu hình)
@@ -607,6 +695,29 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
         return sensor;
     }
 
+    /// <summary>
+    /// Bản ghi mới nhất, và bản ghi HỢP LỆ gần nhất. Cảm biến lỗi: bản ghi mới nhất là lỗi,
+    /// bản ghi hợp lệ gần nhất là một số đo cũ hơn (để hiển thị dữ liệu cũ).
+    /// </summary>
+    private (Measurement? Latest, Measurement? LastValid) CreateMeasurements(
+        string sensorId, SeedInfo seed, DateTime now)
+    {
+        Measurement? latest = CreateMeasurement(sensorId, seed, now);
+        if (latest == null) return (null, null);
+
+        Measurement lastValid = latest.IsError
+            ? new Measurement
+            {
+                Id = ++_measurementId,
+                SensorId = sensorId,
+                MeasuredAt = now.AddMinutes(-30),
+                Value = SampleValue(seed.Kind, seed.ZoneIndex)
+            }
+            : latest;
+
+        return (latest, lastValid);
+    }
+
     private Measurement? CreateMeasurement(string sensorId, SeedInfo seed, DateTime now)
     {
         if (seed.Feed == Feed.None) return null;   // chưa có bản ghi nào
@@ -619,6 +730,7 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
                 m.Value = SampleValue(seed.Kind, seed.ZoneIndex);
                 break;
             case Feed.Stale:
+                // Luôn cũ hơn ngưỡng dữ liệu cũ hiện tại (chu kỳ + 1 giờ) thêm 30 phút
                 m.MeasuredAt = now - (SyncSettings.StaleAfter + TimeSpan.FromMinutes(30));
                 m.Value = SampleValue(seed.Kind, seed.ZoneIndex);
                 break;
@@ -630,6 +742,7 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
         }
         return m;
     }
+
     /// <summary>
     /// Tên khu vực mẫu (cố định, không ngẫu nhiên): ngắn, dài vừa, rất dài và để trống,
     /// để thử cách hiển thị tên trong ô.
@@ -641,6 +754,7 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
         if (zoneIndex % 7 == 5) return "";                                                        // không có tên
         return $"Lô {zoneIndex + 1}";
     }
+
     // Giá trị mô phỏng cố định, chỉ để thử giao diện.
     private static double SampleValue(int kind, int zoneIndex) => kind switch
     {

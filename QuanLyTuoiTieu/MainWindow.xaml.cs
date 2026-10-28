@@ -141,6 +141,9 @@ public partial class MainWindow : Window
 
     private void LoadView()
     {
+        // Cụm cảm biến báo vị trí lần đầu thì ghi nhận làm mốc lắp đặt
+        new PositionService(_dataSource).RecordMissingHomes();
+
         var (cells, summary) = new FarmOverviewService(_dataSource).Build();
         ShowBuilt(cells, summary);
     }
@@ -194,9 +197,10 @@ public partial class MainWindow : Window
 
         for (int i = 0; i < a.Count; i++)
         {
-            if (a[i].Code != b[i].Code
-                || a[i].Status != b[i].Status
-                || a[i].SensorCount != b[i].SensorCount)
+                if (a[i].Code != b[i].Code
+                 || a[i].Status != b[i].Status
+                 || a[i].SensorCount != b[i].SensorCount
+                 || a[i].ClusterMoved != b[i].ClusterMoved)
             {
                 return false;
             }

@@ -5,8 +5,8 @@ using System.Text.Json;
 namespace QuanLyTuoiTieu.Services;
 
 /// <summary>
-/// Cài đặt: chu kỳ lấy dữ liệu (tự chọn), ngưỡng dữ liệu cũ = chu kỳ + 1 giờ, và công tắc ước tính
-/// từ vùng lân cận. Lưu ra tệp nhỏ %LocalAppData%\QuanLyTuoiTieu\settings.json.
+/// Cài đặt: chu kỳ lấy dữ liệu (tự chọn), ngưỡng dữ liệu cũ = chu kỳ + 1 giờ, và ngưỡng cảnh báo cụm
+/// cảm biến bị di chuyển. Lưu ra tệp nhỏ %LocalAppData%\QuanLyTuoiTieu\settings.json.
 /// </summary>
 public static class SyncSettings
 {
@@ -17,6 +17,11 @@ public static class SyncSettings
     /// <summary>Dữ liệu bị coi là cũ khi đã quá chu kỳ đồng bộ cộng thêm khoảng này.</summary>
     public static readonly TimeSpan StaleExtra = TimeSpan.FromHours(1);
 
+    /// <summary>Ngưỡng lệch vị trí so với mốc lắp đặt để cảnh báo cụm cảm biến bị di chuyển (mét).</summary>
+    public const double DefaultMoveThresholdMeters = 30;
+    public const double MinMoveThresholdMeters = 5;
+    public const double MaxMoveThresholdMeters = 10000;
+
     private static readonly string FilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "QuanLyTuoiTieu", "settings.json");
@@ -26,9 +31,7 @@ public static class SyncSettings
     {
         public double IntervalMinutes { get; set; }
         public bool UseHours { get; set; }
-
-        // Đặt tên "tắt" để tệp cài đặt cũ (chưa có trường này) vẫn cho kết quả mặc định là BẬT
-        public bool EstimateDisabled { get; set; }
+        public double MoveThresholdMeters { get; set; }
     }
 
     // Tự nạp cài đặt đã lưu ngay lần đầu có ai dùng lớp này
@@ -46,8 +49,8 @@ public static class SyncSettings
     /// <summary>Ngưỡng dữ liệu cũ = chu kỳ + 1 giờ.</summary>
     public static TimeSpan StaleAfter => Interval + StaleExtra;
 
-    /// <summary>true = khi cảm biến lỗi, hiển thị giá trị ước tính từ khu vực lân cận (mặc định bật).</summary>
-    public static bool EstimateEnabled { get; private set; } = true;
+    /// <summary>Ngưỡng cảnh báo di chuyển (mét).</summary>
+    public static double MoveThresholdMeters { get; private set; } = DefaultMoveThresholdMeters;
 
     /// <summary>Đặt chu kỳ mới (đã kiểm tra khoảng hợp lệ ở nơi gọi) và lưu.</summary>
     public static void SetInterval(TimeSpan interval)
@@ -62,9 +65,10 @@ public static class SyncSettings
         Save();
     }
 
-    public static void SetEstimateEnabled(bool enabled)
+    /// <summary>Đặt ngưỡng cảnh báo di chuyển (đã kiểm tra khoảng hợp lệ ở nơi gọi) và lưu.</summary>
+    public static void SetMoveThreshold(double meters)
     {
-        EstimateEnabled = enabled;
+        MoveThresholdMeters = meters;
         Save();
     }
 
@@ -82,7 +86,12 @@ public static class SyncSettings
                 Interval = TimeSpan.FromMinutes(minutes);
 
             UseHours = data.UseHours;
-            EstimateEnabled = !data.EstimateDisabled;
+
+            if (data.MoveThresholdMeters >= MinMoveThresholdMeters
+                && data.MoveThresholdMeters <= MaxMoveThresholdMeters)
+            {
+                MoveThresholdMeters = data.MoveThresholdMeters;
+            }
         }
         catch (Exception ex)
         {
@@ -100,7 +109,7 @@ public static class SyncSettings
             {
                 IntervalMinutes = Interval.TotalMinutes,
                 UseHours = UseHours,
-                EstimateDisabled = !EstimateEnabled
+                MoveThresholdMeters = MoveThresholdMeters
             };
             File.WriteAllText(FilePath,
                 JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true }));

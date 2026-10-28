@@ -11,6 +11,12 @@ public class ZoneCell : INotifyPropertyChanged
     public ZoneStatus? Status { get; init; }
     public int SensorCount { get; init; }
 
+    /// <summary>true = cụm cảm biến lệch khỏi mốc lắp đặt quá ngưỡng.</summary>
+    public bool ClusterMoved { get; init; }
+
+    /// <summary>Khoảng lệch (mét) khi ClusterMoved = true.</summary>
+    public double? MovedMeters { get; init; }
+
     public bool HasZone => Zone != null;
 
     private bool _isMatch = true;
@@ -43,7 +49,12 @@ public class ZoneCell : INotifyPropertyChanged
             if (Zone == null) return $"{Code}: chưa có khu vực\nNhấn để thêm khu vực";
 
             string title = NameText.Length == 0 ? Code : $"{Code} - {NameText}";
-            return $"{title}\nTrạng thái: {StatusText}\nSố cảm biến: {SensorCount}";
+            string text = $"{title}\nTrạng thái: {StatusText}\nSố cảm biến: {SensorCount}";
+
+            if (ClusterMoved && MovedMeters is double meters)
+                text += $"\n⚠ Cụm cảm biến lệch vị trí {meters:0} m so với mốc";
+
+            return text;
         }
     }
 }

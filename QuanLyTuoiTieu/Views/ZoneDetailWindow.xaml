@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:m="clr-namespace:QuanLyTuoiTieu.Models"
         Title="Chi tiết khu vực"
-        Width="1100" Height="640" MinWidth="900" MinHeight="480"
+        Width="1100" Height="760" MinWidth="900" MinHeight="560"
         WindowStartupLocation="CenterOwner"
         Background="#F3F4F6"
         FontFamily="Segoe UI, Segoe UI Symbol" FontSize="13">
@@ -21,6 +21,22 @@
             <Setter Property="Margin" Value="0,4,24,4"/>
             <Setter Property="VerticalAlignment" Value="Top"/>
         </Style>
+
+        <!-- Dòng trạng thái vị trí: đỏ khi lệch, xanh khi đúng vị trí, xám khi thiếu dữ liệu -->
+        <Style x:Key="PositionStatus" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,4,0,0"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Foreground" Value="#6B7280"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Position.IsOk}" Value="True">
+                    <Setter Property="Foreground" Value="{StaticResource NormalFg}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Position.IsMoved}" Value="True">
+                    <Setter Property="Foreground" Value="{StaticResource DisconnectedFg}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
 
     <Grid>
@@ -29,6 +45,8 @@
             <!-- Tiêu đề -->
             <RowDefinition Height="Auto"/>
             <!-- Thông tin khu vực -->
+            <RowDefinition Height="Auto"/>
+            <!-- Vị trí cụm cảm biến -->
             <RowDefinition Height="Auto"/>
             <!-- Tiêu đề danh sách cảm biến -->
             <RowDefinition Height="*"/>
@@ -86,19 +104,63 @@
             </Grid>
         </Border>
 
-        <!-- ===== 3. Tiêu đề danh sách cảm biến + công tắc ước tính ===== -->
-        <DockPanel Grid.Row="2" Margin="16,12,16,6">
-            <CheckBox x:Name="EstimateCheck" DockPanel.Dock="Right" Content="Ước tính khi cảm biến lỗi"
-                      VerticalAlignment="Center" IsChecked="True"
-                      ToolTip="Khi cảm biến lỗi, hiển thị giá trị ước tính (trung bình cảm biến cùng loại ở khu vực lân cận, cần ít nhất 4 nguồn). Giá trị này không phải số đo thật."
-                      Checked="Estimate_Changed" Unchecked="Estimate_Changed"/>
+        <!-- ===== 3. Vị trí cụm cảm biến (đỏ khi lệch khỏi mốc) ===== -->
+        <Border Grid.Row="2" Margin="12,8,12,0" Padding="16,10" CornerRadius="8" BorderThickness="1">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Background" Value="White"/>
+                    <Setter Property="BorderBrush" Value="#E5E7EB"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding Position.IsMoved}" Value="True">
+                            <Setter Property="Background" Value="{StaticResource DisconnectedBg}"/>
+                            <Setter Property="BorderBrush" Value="{StaticResource DisconnectedBorder}"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" VerticalAlignment="Center" Margin="16,0,0,0">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button x:Name="MapButton" Content="Xem trên bản đồ" Padding="12,4"
+                                Click="Map_Click" ToolTipService.ShowOnDisabled="True"
+                                ToolTip="Mở vị trí hiện tại của cụm cảm biến trên bản đồ (trình duyệt, cần Internet)"/>
+                        <Button x:Name="SetHomeButton" Content="Đặt mốc tại vị trí hiện tại" Padding="12,4"
+                                Margin="8,0,0,0" Click="SetHome_Click" ToolTipService.ShowOnDisabled="True"
+                                ToolTip="Dùng vị trí hiện tại làm mốc lắp đặt mới (khi bạn cố ý dời khối cảm biến)"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                        <TextBlock Text="Ngưỡng cảnh báo lệch:" VerticalAlignment="Center" Foreground="#6B7280"/>
+                        <TextBox x:Name="ThresholdBox" Width="56" Margin="6,0,0,0" Padding="3,2" MaxLength="8"
+                                 VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
+                                 ToolTip="Từ 5 đến 10000 mét. Nhập rồi nhấn Enter. Áp dụng cho mọi khu vực."
+                                 KeyDown="ThresholdBox_KeyDown" LostFocus="ThresholdBox_LostFocus"/>
+                        <TextBlock Text="m" VerticalAlignment="Center" Margin="4,0,0,0" Foreground="#6B7280"/>
+                        <Button x:Name="SimMoveButton" Content="Giả lập di chuyển 50 m" Padding="10,3"
+                                Margin="14,0,0,0" Visibility="Collapsed" Click="SimMove_Click"
+                                ToolTip="Chỉ có ở chế độ mô phỏng: dịch cụm cảm biến 50 m về phía đông (cộng dồn)"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel>
+                    <TextBlock Text="VỊ TRÍ CỤM CẢM BIẾN" FontWeight="SemiBold" FontSize="13"/>
+                    <TextBlock Text="{Binding Position.PositionText}" Margin="0,4,0,0" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding Position.UpdatedText}" Foreground="#6B7280" FontSize="12"/>
+                    <TextBlock Text="{Binding Position.HomeText}" Margin="0,4,0,0"/>
+                    <TextBlock Text="{Binding Position.StatusText}" Style="{StaticResource PositionStatus}"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- ===== 4. Tiêu đề danh sách cảm biến ===== -->
+        <DockPanel Grid.Row="3" Margin="16,12,16,6">
             <TextBlock Text="DANH SÁCH CẢM BIẾN" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center"/>
             <TextBlock x:Name="HintText" Foreground="#92400E" FontSize="12" VerticalAlignment="Center"
-                       Margin="16,0,16,0" TextTrimming="CharacterEllipsis"/>
+                       Margin="16,0,0,0" TextTrimming="CharacterEllipsis"/>
         </DockPanel>
 
-        <!-- ===== 4. Lưới thẻ cảm biến: thẻ sáng = đã kết nối, thẻ mờ = chưa ===== -->
-        <ScrollViewer Grid.Row="3" Margin="6,0,6,0" VerticalScrollBarVisibility="Auto"
+        <!-- ===== 5. Lưới thẻ cảm biến ===== -->
+        <ScrollViewer Grid.Row="4" Margin="6,0,6,0" VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled">
             <ItemsControl ItemsSource="{Binding Tiles}">
                 <ItemsControl.ItemsPanel>
@@ -127,10 +189,6 @@
                                            FontSize="12.5" Margin="0,4,0,0" TextWrapping="Wrap"/>
                                 <TextBlock Text="{Binding FooterText}" Foreground="#6B7280" FontSize="11.5"
                                            Margin="0,3,0,0" TextWrapping="Wrap"/>
-                                <!-- Thông báo giá trị ước tính (chỉ hiện khi có nội dung) -->
-                                <TextBlock x:Name="NoticeBlock" Text="{Binding NoticeText}" Visibility="Collapsed"
-                                           Foreground="#6B7280" FontSize="11.5" FontStyle="Italic"
-                                           TextWrapping="Wrap" Margin="0,6,0,0"/>
                             </StackPanel>
                         </Border>
 
@@ -138,10 +196,6 @@
                             <!-- Chế độ mô phỏng: thẻ bấm được -->
                             <DataTrigger Binding="{Binding IsClickable}" Value="True">
                                 <Setter TargetName="TileBorder" Property="Cursor" Value="Hand"/>
-                            </DataTrigger>
-
-                            <DataTrigger Binding="{Binding HasNotice}" Value="True">
-                                <Setter TargetName="NoticeBlock" Property="Visibility" Value="Visible"/>
                             </DataTrigger>
 
                             <!-- Màu theo trạng thái dữ liệu (thẻ sáng) -->
@@ -161,15 +215,21 @@
                                 <Setter TargetName="StatusBlock" Property="Foreground" Value="{StaticResource DisconnectedFg}"/>
                                 <Setter TargetName="ValueBlock" Property="Foreground" Value="{StaticResource DisconnectedFg}"/>
                             </DataTrigger>
-
-                            <!-- Giá trị ƯỚC TÍNH: nghiêng, màu cam (đặt sau trigger Error để ghi đè màu đỏ) -->
-                            <DataTrigger Binding="{Binding IsEstimated}" Value="True">
-                                <Setter TargetName="ValueBlock" Property="Foreground" Value="{StaticResource WarningFg}"/>
-                                <Setter TargetName="ValueBlock" Property="FontStyle" Value="Italic"/>
-                                <Setter TargetName="NoticeBlock" Property="Foreground" Value="{StaticResource WarningFg}"/>
+                            <!-- Đã đăng ký nhưng chưa có dữ liệu: thẻ sáng viền xanh tím, giá trị "—" -->
+                            <DataTrigger Binding="{Binding DataStatus}" Value="{x:Static m:DataStatus.NoData}">
+                                <Setter TargetName="TileBorder" Property="BorderBrush" Value="{StaticResource NotConfiguredBorder}"/>
+                                <Setter TargetName="TileBorder" Property="BorderThickness" Value="2"/>
+                                <Setter TargetName="StatusBlock" Property="Foreground" Value="{StaticResource NotConfiguredFg}"/>
+                                <Setter TargetName="ValueBlock" Property="Foreground" Value="#6B7280"/>
                             </DataTrigger>
 
-                            <!-- Thẻ mờ (đặt cuối để ghi đè): chưa kết nối -->
+                            <!-- Đang hiển thị giá trị CŨ (cảm biến lỗi): chữ xám nghiêng (đặt sau trigger Error) -->
+                            <DataTrigger Binding="{Binding IsOldValue}" Value="True">
+                                <Setter TargetName="ValueBlock" Property="Foreground" Value="#6B7280"/>
+                                <Setter TargetName="ValueBlock" Property="FontStyle" Value="Italic"/>
+                            </DataTrigger>
+
+                            <!-- Thẻ mờ (đặt cuối để ghi đè): chưa kết nối, đã gỡ, ESP32 ngừng -->
                             <DataTrigger Binding="{Binding IsLit}" Value="False">
                                 <Setter TargetName="TileBorder" Property="Opacity" Value="0.45"/>
                                 <Setter TargetName="TileBorder" Property="Background" Value="#F3F4F6"/>
@@ -183,8 +243,8 @@
             </ItemsControl>
         </ScrollViewer>
 
-        <!-- ===== 5. Chân cửa sổ ===== -->
-        <Border Grid.Row="4" Margin="0,12,0,0" Background="White" BorderBrush="#E5E7EB"
+        <!-- ===== 6. Chân cửa sổ ===== -->
+        <Border Grid.Row="5" Margin="0,12,0,0" Background="White" BorderBrush="#E5E7EB"
                 BorderThickness="0,1,0,0" Padding="16,8">
             <DockPanel>
                 <Button DockPanel.Dock="Right" Content="Đóng" Width="100" Padding="12,5"

@@ -19,6 +19,25 @@ public interface IFarmDataSource
     /// </summary>
     IReadOnlyDictionary<string, Measurement> GetLatestMeasurements();
 
+    /// <summary>
+    /// Bản ghi đo HỢP LỆ gần nhất của từng cảm biến (có giá trị, không phải bản ghi lỗi).
+    /// Dùng để hiển thị dữ liệu cũ khi bản ghi mới nhất là lỗi. Cảm biến chưa từng có số đo hợp lệ
+    /// thì không có trong từ điển.
+    /// </summary>
+    IReadOnlyDictionary<string, Measurement> GetLastValidMeasurements();
+
+    /// <summary>
+    /// Vị trí GPS mới nhất do cụm cảm biến của từng khu vực báo về (khóa = mã khu vực).
+    /// Khu vực chưa có tín hiệu thì không có trong từ điển.
+    /// </summary>
+    IReadOnlyDictionary<string, GpsPosition> GetZonePositions();
+
+    /// <summary>Mốc lắp đặt (vị trí đặt khối cảm biến) của từng khu vực (khóa = mã khu vực).</summary>
+    IReadOnlyDictionary<string, GpsPosition> GetZoneHomes();
+
+    /// <summary>Đặt hoặc đổi mốc lắp đặt của khu vực. Ném InvalidOperationException nếu không tìm thấy khu vực.</summary>
+    void SetZoneHome(string zoneCode, GpsPosition home);
+
     /// <summary>Tên nguồn dữ liệu hiển thị cho người dùng, ví dụ "Dữ liệu mô phỏng".</summary>
     string SourceName { get; }
 

@@ -32,4 +32,7 @@ public interface ISimulationControls
     /// Trả về null nếu thành công, hoặc thông báo lỗi tiếng Việt.
     /// </summary>
     string? DisconnectTestSensor(string zoneCode, string sensorTypeId);
+
+    /// <summary>Giả lập cụm cảm biến của khu vực bị dịch chuyển (mét, cộng dồn): thử cảnh báo di chuyển.</summary>
+    void SimulateMove(string zoneCode, double northMeters, double eastMeters);
 }

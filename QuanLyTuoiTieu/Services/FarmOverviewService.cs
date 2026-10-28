@@ -3,7 +3,7 @@ using QuanLyTuoiTieu.ViewModels;
 
 namespace QuanLyTuoiTieu.Services;
 
-/// <summary>Dựng ma trận 156 ô và số liệu thống kê từ nguồn dữ liệu.</summary>
+/// <summary>Dựng ma trận 144 ô và số liệu thống kê từ nguồn dữ liệu.</summary>
 public class FarmOverviewService
 {
     /// <summary>Dữ liệu cũ hơn mức này bị coi là "đã cũ": chu kỳ đồng bộ + 1 giờ (xem SyncSettings).</summary>
@@ -16,7 +16,7 @@ public class FarmOverviewService
         _dataSource = dataSource;
     }
 
-    /// <summary>Mã khu vực từ hàng/cột. Ví dụ (1,1) -> A01; (13,12) -> M12.</summary>
+    /// <summary>Mã khu vực từ hàng/cột. Ví dụ (1,1) -> A01; (12,12) -> L12.</summary>
     public static string MakeCode(int row, int column) => $"{(char)('A' + row - 1)}{column:00}";
 
     public (List<ZoneCell> Cells, FarmSummary Summary) Build()
@@ -25,6 +25,9 @@ public class FarmOverviewService
         var zones = _dataSource.GetZones();
         var sensors = _dataSource.GetSensors();
         var latest = _dataSource.GetLatestMeasurements();
+        var positions = _dataSource.GetZonePositions();
+        var homes = _dataSource.GetZoneHomes();
+        double moveThreshold = SyncSettings.MoveThresholdMeters;
 
         var zoneByCode = zones.ToDictionary(z => z.Code);   // báo lỗi nếu có mã khu vực trùng
         var sensorsByZone = sensors
@@ -46,8 +49,14 @@ public class FarmOverviewService
                     continue;
                 }
 
+                // Cụm cảm biến lệch khỏi mốc lắp đặt quá ngưỡng?
+                positions.TryGetValue(code, out GpsPosition? position);
+                homes.TryGetValue(code, out GpsPosition? home);
+                double? distance = PositionService.DistanceBetween(position, home);
+                bool clusterMoved = distance is double d && d > moveThreshold;
+
                 var activeSensors = sensorsByZone[code].ToList();
-                ZoneStatus status = CalculateZoneStatus(zone, activeSensors, latest, nowUtc);
+                ZoneStatus status = CalculateZoneStatus(zone, activeSensors, latest, nowUtc, clusterMoved);
 
                 switch (status)
                 {
@@ -61,7 +70,9 @@ public class FarmOverviewService
                     Code = code,
                     Zone = zone,
                     Status = status,
-                    SensorCount = activeSensors.Count
+                    SensorCount = activeSensors.Count,
+                    ClusterMoved = clusterMoved,
+                    MovedMeters = clusterMoved ? distance : null
                 });
             }
         }
@@ -74,11 +85,16 @@ public class FarmOverviewService
         return (cells, summary);
     }
 
+    /// <summary>
+    /// Trạng thái khu vực. clusterMoved = true (cụm cảm biến lệch khỏi mốc) đưa khu vực
+    /// từ "Bình thường" sang "Cảnh báo"; không đổi "Chưa cấu hình" và "Mất kết nối".
+    /// </summary>
     public static ZoneStatus CalculateZoneStatus(
         Zone zone,
         IReadOnlyList<Sensor> activeSensors,
         IReadOnlyDictionary<string, Measurement> latest,
-        DateTime nowUtc)
+        DateTime nowUtc,
+        bool clusterMoved = false)
     {
         if (activeSensors.Count == 0) return ZoneStatus.NotConfigured;
 
@@ -91,7 +107,8 @@ public class FarmOverviewService
             return ZoneStatus.Disconnected;
 
         bool hasProblem = activeSensors.Any(s => s.Status == SensorStatus.Faulty)
-                          || dataStatuses.Any(d => d != DataStatus.Fresh);
+                          || dataStatuses.Any(d => d != DataStatus.Fresh)
+                          || clusterMoved;
 
         return hasProblem ? ZoneStatus.Warning : ZoneStatus.Normal;
     }
