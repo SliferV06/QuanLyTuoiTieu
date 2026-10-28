@@ -29,17 +29,12 @@
             <Setter Property="Foreground" Value="#111827"/>
         </Style>
 
-        <!-- ===== Chú giải (ô màu nhỏ + biểu tượng + chữ) ===== -->
-        <Style x:Key="LegendSwatch" TargetType="Border">
-            <Setter Property="Width" Value="14"/>
-            <Setter Property="Height" Value="14"/>
-            <Setter Property="CornerRadius" Value="3"/>
+        <!-- ===== Chú giải (chip có nền màu) ===== -->
+        <Style x:Key="LegendChip" TargetType="Border">
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
-        </Style>
-        <Style x:Key="LegendText" TargetType="TextBlock">
-            <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="Margin" Value="5,0,0,0"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="8,2"/>
+            <Setter Property="Margin" Value="8,0,0,0"/>
         </Style>
 
         <!-- ===== Nút chính (nền xanh) ===== -->
@@ -69,7 +64,7 @@
             </Setter>
         </Style>
 
-        <!-- ===== Ô khu vực trong ma trận (giữ nguyên thiết kế) ===== -->
+        <!-- ===== Ô khu vực trong ma trận: mã + biểu tượng, dưới là tên khu vực ===== -->
         <Style x:Key="ZoneCellStyle" TargetType="Button">
             <Setter Property="Margin" Value="3"/>
             <Setter Property="Cursor" Value="Hand"/>
@@ -81,7 +76,7 @@
                                 Background="{StaticResource EmptyBg}"
                                 BorderBrush="{StaticResource EmptyBorder}"
                                 BorderThickness="1" CornerRadius="6" Padding="2">
-                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Stretch">
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                                     <TextBlock Text="{Binding Code}" FontSize="15" FontWeight="Bold"
                                                Foreground="{TemplateBinding Foreground}"/>
@@ -89,8 +84,12 @@
                                                FontSize="12" Margin="5,2,0,0"
                                                Foreground="{TemplateBinding Foreground}"/>
                                 </StackPanel>
-                                <TextBlock Text="{Binding StatusText}" FontSize="10.5"
-                                           HorizontalAlignment="Center"
+                                <!-- Tên khu vực: tối đa 2 dòng, hết chỗ mới dùng dấu ... -->
+                                <TextBlock Text="{Binding NameText}" FontSize="10.5" Margin="2,1,2,0"
+                                           TextAlignment="Center" TextWrapping="Wrap"
+                                           TextTrimming="CharacterEllipsis"
+                                           LineHeight="13" LineStackingStrategy="BlockLineHeight"
+                                           MaxHeight="26"
                                            Foreground="{TemplateBinding Foreground}"/>
                             </StackPanel>
                         </Border>
@@ -158,8 +157,8 @@
                                       ToolTip="Lần đồng bộ sau không có phản hồi, chờ hết thời gian chờ (30 giây) rồi báo thất bại"
                                       Checked="Simulation_Changed" Unchecked="Simulation_Changed"/>
                             <Separator/>
-                            <MenuItem Header="Tua dữ liệu cũ thêm 1 giờ" Click="AgeData_Click"
-                                      ToolTip="Làm mọi giá trị đo cũ thêm 1 giờ ngay lập tức, để xem trạng thái dữ liệu cũ và mất kết nối"/>
+                            <MenuItem Header="Tua dữ liệu thành cũ" Click="AgeData_Click"
+                                      ToolTip="Làm mọi giá trị đo cũ thêm (ngưỡng dữ liệu cũ + 1 phút) ngay lập tức, để xem trạng thái dữ liệu cũ và mất kết nối"/>
                             <MenuItem Header="Tạo đủ 144 khu vực mẫu" Click="FillZones_Click"
                                       ToolTip="Điền mọi ô còn trống bằng khu vực mẫu kèm ESP32 và cảm biến mô phỏng"/>
                             <MenuItem Header="Đặt lại dữ liệu mẫu" Click="ResetSample_Click"
@@ -244,50 +243,48 @@
         </Grid>
 
         <!-- ===== 3. Khung sơ đồ khu vực =====
-             MatrixHost là vùng còn lại; MatrixFrame co theo nội dung. Mã trong MainWindow.xaml.cs
-             đặt chiều cao ma trận (ZoneMatrix.Height) bằng số nguyên hàng để không bao giờ thấy nửa hàng. -->
+             Mã trong MainWindow.xaml.cs đặt chiều cao ma trận (ZoneMatrix.Height) bằng số nguyên hàng
+             để không bao giờ thấy nửa hàng. -->
         <Grid x:Name="MatrixHost" Grid.Row="2" Margin="12,8,12,8" SizeChanged="MatrixHost_SizeChanged">
             <Border x:Name="MatrixFrame" VerticalAlignment="Top" Background="White" BorderBrush="#E5E7EB"
                     BorderThickness="1" CornerRadius="8" Padding="0,0,0,4">
                 <DockPanel>
 
-                    <!-- Dòng 1: tiêu đề sơ đồ + chú giải -->
+                    <!-- Dòng 1: tiêu đề sơ đồ + chú giải 5 trạng thái -->
                     <DockPanel DockPanel.Dock="Top" Margin="16,10,16,0">
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                            <StackPanel Orientation="Horizontal" Margin="16,0,0,0">
-                                <Border Style="{StaticResource LegendSwatch}"
-                                        Background="{StaticResource NormalBg}" BorderBrush="{StaticResource NormalBorder}"/>
-                                <TextBlock Style="{StaticResource LegendText}" Foreground="{StaticResource NormalFg}">
-                                    <Run FontFamily="Segoe UI Symbol" Text="✔"/><Run Text=" Bình thường"/>
-                                </TextBlock>
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="16,0,0,0">
-                                <Border Style="{StaticResource LegendSwatch}"
-                                        Background="{StaticResource WarningBg}" BorderBrush="{StaticResource WarningBorder}"/>
-                                <TextBlock Style="{StaticResource LegendText}" Foreground="{StaticResource WarningFg}">
-                                    <Run FontFamily="Segoe UI Symbol" Text="⚠"/><Run Text=" Cảnh báo"/>
-                                </TextBlock>
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="16,0,0,0">
-                                <Border Style="{StaticResource LegendSwatch}"
-                                        Background="{StaticResource DisconnectedBg}" BorderBrush="{StaticResource DisconnectedBorder}"/>
-                                <TextBlock Style="{StaticResource LegendText}" Foreground="{StaticResource DisconnectedFg}">
-                                    <Run FontFamily="Segoe UI Symbol" Text="✖"/><Run Text=" Mất kết nối"/>
-                                </TextBlock>
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="16,0,0,0">
-                                <Border Style="{StaticResource LegendSwatch}"
-                                        Background="{StaticResource NotConfiguredBg}" BorderBrush="{StaticResource NotConfiguredBorder}"/>
-                                <TextBlock Style="{StaticResource LegendText}" Foreground="{StaticResource NotConfiguredFg}">
-                                    <Run FontFamily="Segoe UI Symbol" Text="○"/><Run Text=" Chưa cấu hình"/>
-                                </TextBlock>
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="16,0,0,0">
-                                <Border Style="{StaticResource LegendSwatch}"
-                                        Background="{StaticResource EmptyBg}" BorderBrush="{StaticResource EmptyBorder}"/>
-                                <TextBlock Style="{StaticResource LegendText}" Foreground="{StaticResource EmptyFg}"
-                                           Text="Trống (chưa có khu vực)"/>
-                            </StackPanel>
+                            <Border Style="{StaticResource LegendChip}"
+                                    Background="{StaticResource NormalBg}" BorderBrush="{StaticResource NormalBorder}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="✔" FontFamily="Segoe UI Symbol" Foreground="{StaticResource NormalFg}" Margin="0,0,5,0"/>
+                                    <TextBlock Text="Bình thường" Foreground="{StaticResource NormalFg}"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource LegendChip}"
+                                    Background="{StaticResource WarningBg}" BorderBrush="{StaticResource WarningBorder}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="⚠" FontFamily="Segoe UI Symbol" Foreground="{StaticResource WarningFg}" Margin="0,0,5,0"/>
+                                    <TextBlock Text="Cảnh báo" Foreground="{StaticResource WarningFg}"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource LegendChip}"
+                                    Background="{StaticResource DisconnectedBg}" BorderBrush="{StaticResource DisconnectedBorder}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="✖" FontFamily="Segoe UI Symbol" Foreground="{StaticResource DisconnectedFg}" Margin="0,0,5,0"/>
+                                    <TextBlock Text="Mất kết nối" Foreground="{StaticResource DisconnectedFg}"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource LegendChip}"
+                                    Background="{StaticResource NotConfiguredBg}" BorderBrush="{StaticResource NotConfiguredBorder}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="○" FontFamily="Segoe UI Symbol" Foreground="{StaticResource NotConfiguredFg}" Margin="0,0,5,0"/>
+                                    <TextBlock Text="Chưa cấu hình" Foreground="{StaticResource NotConfiguredFg}"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource LegendChip}"
+                                    Background="{StaticResource EmptyBg}" BorderBrush="{StaticResource EmptyBorder}">
+                                <TextBlock Text="Trống (chưa có khu vực)" Foreground="{StaticResource EmptyFg}"/>
+                            </Border>
                         </StackPanel>
 
                         <TextBlock FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center"
@@ -381,8 +378,20 @@
                     <Border Width="1" Background="#E5E7EB" Margin="12,2,12,2"/>
                     <Button x:Name="RefreshButton" Content="Làm mới dữ liệu" Padding="10,2" MinWidth="120"
                             Click="Refresh_Click"/>
-                    <CheckBox x:Name="AutoSyncCheck" IsChecked="True" VerticalAlignment="Center"
-                              Margin="12,0,0,0" Checked="AutoSync_Changed" Unchecked="AutoSync_Changed"/>
+
+                    <!-- Chu kỳ đồng bộ tự chọn: ô số + đơn vị phút/giờ -->
+                    <CheckBox x:Name="AutoSyncCheck" Content="Tự đồng bộ mỗi" IsChecked="True"
+                              VerticalAlignment="Center" Margin="12,0,0,0"
+                              Checked="AutoSync_Changed" Unchecked="AutoSync_Changed"/>
+                    <TextBox x:Name="IntervalBox" Width="52" Margin="8,0,0,0" Padding="3,2" MaxLength="8"
+                             VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
+                             ToolTip="Nhập chu kỳ (từ 1 phút đến 24 giờ) rồi nhấn Enter"
+                             KeyDown="IntervalBox_KeyDown" LostFocus="IntervalBox_LostFocus"/>
+                    <ComboBox x:Name="UnitCombo" Width="68" Margin="6,0,0,0" Padding="6,2" SelectedIndex="0"
+                              SelectionChanged="UnitCombo_SelectionChanged">
+                        <ComboBoxItem Content="phút"/>
+                        <ComboBoxItem Content="giờ"/>
+                    </ComboBox>
                     <TextBlock x:Name="NextSyncText" Foreground="#6B7280" VerticalAlignment="Center"
                                Margin="10,0,0,0"/>
                 </StackPanel>

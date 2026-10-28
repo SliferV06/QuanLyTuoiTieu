@@ -6,12 +6,8 @@ namespace QuanLyTuoiTieu.Services;
 /// <summary>Dựng ma trận 156 ô và số liệu thống kê từ nguồn dữ liệu.</summary>
 public class FarmOverviewService
 {
-    /// <summary>
-    /// Dữ liệu cũ hơn mức này bị coi là "đã cũ". Đổi con số ở đây nếu cần.
-    /// Lưu ý: node đo mỗi 10 phút, ứng dụng đồng bộ mỗi 20 phút, nên dữ liệu có thể già tới khoảng 30 phút
-    /// trước lần đồng bộ kế tiếp; ngưỡng thấp hơn 30 phút có thể báo "cũ" trong lúc vẫn bình thường.
-    /// </summary>
-    public static readonly TimeSpan StaleAfter = TimeSpan.FromMinutes(25);
+    /// <summary>Dữ liệu cũ hơn mức này bị coi là "đã cũ": chu kỳ đồng bộ + 1 giờ (xem SyncSettings).</summary>
+    public static TimeSpan StaleAfter => SyncSettings.StaleAfter;
 
     private readonly IFarmDataSource _dataSource;
 

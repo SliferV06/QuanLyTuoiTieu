@@ -1,5 +1,4 @@
 ﻿using System.Windows;
-using System.Windows.Controls;
 using QuanLyTuoiTieu.Models;
 using QuanLyTuoiTieu.Services;
 
@@ -13,7 +12,6 @@ public partial class ZoneEditWindow : Window
 {
     private readonly ZoneManagementService _service;
     private readonly Zone? _editingZone;
-    private string _autoName = "";   // tên gợi ý tự điền, để biết người dùng đã tự sửa tên chưa
 
     public ZoneEditWindow(ZoneManagementService service, Zone? editingZone, string? presetCode = null)
     {
@@ -52,17 +50,6 @@ public partial class ZoneEditWindow : Window
 
         NameBox.Focus();
         NameBox.SelectAll();
-    }
-
-    private void CodeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (CodeCombo.SelectedItem is not string code) return;
-
-        // Tự điền tên gợi ý, trừ khi người dùng đã tự gõ tên khác
-        string newAuto = $"Khu vực {code}";
-        if (NameBox.Text.Length == 0 || NameBox.Text == _autoName)
-            NameBox.Text = newAuto;
-        _autoName = newAuto;
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)

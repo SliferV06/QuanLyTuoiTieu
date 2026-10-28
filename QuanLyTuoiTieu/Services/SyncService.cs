@@ -5,16 +5,13 @@ namespace QuanLyTuoiTieu.Services;
 
 /// <summary>
 /// Điều phối việc đồng bộ dữ liệu từ nguồn: không chạy chồng, có thời gian chờ tối đa,
-/// giữ dữ liệu cũ khi lỗi, tự đồng bộ định kỳ, và ghi nhớ kết quả để hiển thị.
+/// giữ dữ liệu cũ khi lỗi, tự đồng bộ định kỳ (chu kỳ tự chọn), và ghi nhớ kết quả để hiển thị.
 /// Mọi thành viên được dùng trên luồng giao diện.
 /// </summary>
 public class SyncService
 {
     /// <summary>Thời gian chờ tối đa cho một lần đồng bộ.</summary>
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
-
-    /// <summary>Chu kỳ đồng bộ tự động mặc định của ứng dụng desktop.</summary>
-    public static readonly TimeSpan DefaultAutoSyncInterval = TimeSpan.FromMinutes(20);
 
     private readonly IFarmDataSource _dataSource;
     private readonly DispatcherTimer _autoTimer;
@@ -24,12 +21,12 @@ public class SyncService
     {
         _dataSource = dataSource;
 
-        AutoSyncInterval = DefaultAutoSyncInterval;
+        AutoSyncInterval = SyncSettings.Interval;
         _autoTimer = new DispatcherTimer { Interval = AutoSyncInterval };
         _autoTimer.Tick += OnAutoTick;
     }
 
-    /// <summary>Xảy ra khi trạng thái thay đổi (bắt đầu/kết thúc đồng bộ, bật/tắt tự động).</summary>
+    /// <summary>Xảy ra khi trạng thái thay đổi (bắt đầu/kết thúc đồng bộ, bật/tắt tự động, đổi chu kỳ).</summary>
     public event EventHandler? StateChanged;
 
     /// <summary>Xảy ra sau mỗi lần đồng bộ kết thúc (tham số: true = thành công).</summary>
@@ -53,7 +50,9 @@ public class SyncService
 
     // ===== Đồng bộ tự động =====
 
-    public TimeSpan AutoSyncInterval { get; }
+    /// <summary>Chu kỳ đồng bộ tự động hiện tại (người dùng tự chọn).</summary>
+    public TimeSpan AutoSyncInterval { get; private set; }
+
     public bool AutoSyncEnabled { get; private set; }
 
     /// <summary>Thời điểm đồng bộ tự động tiếp theo (UTC). null nếu đang tắt.</summary>
@@ -62,6 +61,14 @@ public class SyncService
     public void SetAutoSyncEnabled(bool enabled)
     {
         AutoSyncEnabled = enabled;
+        ScheduleNextAutoSync();
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Đổi chu kỳ đồng bộ tự động. Mốc tiếp theo được tính lại từ bây giờ.</summary>
+    public void SetAutoSyncInterval(TimeSpan interval)
+    {
+        AutoSyncInterval = interval;
         ScheduleNextAutoSync();
         StateChanged?.Invoke(this, EventArgs.Empty);
     }

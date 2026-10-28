@@ -3,10 +3,10 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:m="clr-namespace:QuanLyTuoiTieu.Models"
         Title="Chi tiết khu vực"
-        Width="1250" Height="640" MinWidth="1000" MinHeight="480"
+        Width="1100" Height="640" MinWidth="900" MinHeight="480"
         WindowStartupLocation="CenterOwner"
         Background="#F3F4F6"
-        FontFamily="Segoe UI" FontSize="13">
+        FontFamily="Segoe UI, Segoe UI Symbol" FontSize="13">
 
     <Window.Resources>
         <Style x:Key="InfoLabel" TargetType="TextBlock">
@@ -21,30 +21,6 @@
             <Setter Property="Margin" Value="0,4,24,4"/>
             <Setter Property="VerticalAlignment" Value="Top"/>
         </Style>
-
-        <!-- Ô chữ trong bảng: tự xuống dòng, chữ xám nếu cảm biến đã gỡ -->
-        <Style x:Key="WrapCell" TargetType="TextBlock">
-            <Setter Property="TextWrapping" Value="Wrap"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="Margin" Value="6,4"/>
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding IsRemoved}" Value="True">
-                    <Setter Property="Foreground" Value="#9CA3AF"/>
-                </DataTrigger>
-            </Style.Triggers>
-        </Style>
-        <Style x:Key="WrapCellBold" TargetType="TextBlock" BasedOn="{StaticResource WrapCell}">
-            <Setter Property="FontWeight" Value="SemiBold"/>
-        </Style>
-
-        <Style x:Key="GridHeader" TargetType="DataGridColumnHeader">
-            <Setter Property="Background" Value="#F3F4F6"/>
-            <Setter Property="Foreground" Value="#374151"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Padding" Value="8,6"/>
-            <Setter Property="BorderBrush" Value="#E5E7EB"/>
-            <Setter Property="BorderThickness" Value="0,0,1,1"/>
-        </Style>
     </Window.Resources>
 
     <Grid>
@@ -54,11 +30,9 @@
             <RowDefinition Height="Auto"/>
             <!-- Thông tin khu vực -->
             <RowDefinition Height="Auto"/>
-            <!-- Tiêu đề danh sách -->
-            <RowDefinition Height="Auto"/>
-            <!-- Thông báo chưa có cảm biến -->
+            <!-- Tiêu đề danh sách cảm biến -->
             <RowDefinition Height="*"/>
-            <!-- Bảng cảm biến -->
+            <!-- Lưới thẻ cảm biến -->
             <RowDefinition Height="Auto"/>
             <!-- Chân cửa sổ -->
         </Grid.RowDefinitions>
@@ -112,117 +86,105 @@
             </Grid>
         </Border>
 
-        <!-- ===== 3. Tiêu đề danh sách ===== -->
+        <!-- ===== 3. Tiêu đề danh sách cảm biến + công tắc ước tính ===== -->
         <DockPanel Grid.Row="2" Margin="16,12,16,6">
-            <CheckBox x:Name="ShowRemovedCheck" DockPanel.Dock="Right" VerticalAlignment="Center"
-                      Checked="ShowRemoved_Changed" Unchecked="ShowRemoved_Changed"/>
-            <Button x:Name="AddSensorButton" DockPanel.Dock="Right" Content="+ Thêm cảm biến"
-                    Padding="12,4" Margin="0,0,20,0" Click="AddSensor_Click"/>
-            <Button x:Name="DeleteSensorButton" DockPanel.Dock="Right" Content="Xóa cảm biến"
-                    Padding="12,4" Margin="0,0,8,0" IsEnabled="False" Click="DeleteSensor_Click"
-                    ToolTipService.ShowOnDisabled="True"
-                    ToolTip="Chọn một cảm biến đã gỡ rồi nhấn để xóa hẳn khỏi dữ liệu"/>
-            <Button x:Name="RestoreSensorButton" DockPanel.Dock="Right" Content="Khôi phục"
-                    Padding="12,4" Margin="0,0,8,0" IsEnabled="False" Click="RestoreSensor_Click"
-                    ToolTipService.ShowOnDisabled="True"
-                    ToolTip="Tích &quot;Hiển thị cả cảm biến đã gỡ&quot;, chọn một cảm biến đã gỡ rồi nhấn để khôi phục"/>
-            <Button x:Name="RemoveSensorButton" DockPanel.Dock="Right" Content="Gỡ cảm biến"
-                    Padding="12,4" Margin="0,0,8,0" IsEnabled="False" Click="RemoveSensor_Click"/>
-            <Button x:Name="ReplaceSensorButton" DockPanel.Dock="Right" Content="Thay thế"
-                    Padding="12,4" Margin="0,0,8,0" IsEnabled="False" Click="ReplaceSensor_Click"/>
-            <Button x:Name="EditSensorButton" DockPanel.Dock="Right" Content="Sửa cảm biến"
-                    Padding="12,4" Margin="0,0,8,0" IsEnabled="False" Click="EditSensor_Click"/>
-            <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
-                <Run Text="DANH SÁCH CẢM BIẾN" FontWeight="SemiBold" FontSize="14"/>
-                <Run x:Name="SelectionHintRun" Foreground="#6B7280" FontSize="12"/>
-            </TextBlock>
+            <CheckBox x:Name="EstimateCheck" DockPanel.Dock="Right" Content="Ước tính khi cảm biến lỗi"
+                      VerticalAlignment="Center" IsChecked="True"
+                      ToolTip="Khi cảm biến lỗi, hiển thị giá trị ước tính (trung bình cảm biến cùng loại ở khu vực lân cận, cần ít nhất 4 nguồn). Giá trị này không phải số đo thật."
+                      Checked="Estimate_Changed" Unchecked="Estimate_Changed"/>
+            <TextBlock Text="DANH SÁCH CẢM BIẾN" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center"/>
+            <TextBlock x:Name="HintText" Foreground="#92400E" FontSize="12" VerticalAlignment="Center"
+                       Margin="16,0,16,0" TextTrimming="CharacterEllipsis"/>
         </DockPanel>
 
-        <TextBlock x:Name="NoSensorText" Grid.Row="3" Margin="16,0,16,8" Foreground="#92400E"
-                                      Visibility="Collapsed"
-                   Text="Khu vực này chưa có cảm biến. Nhấn &quot;+ Thêm cảm biến&quot; để thêm."/>
+        <!-- ===== 4. Lưới thẻ cảm biến: thẻ sáng = đã kết nối, thẻ mờ = chưa ===== -->
+        <ScrollViewer Grid.Row="3" Margin="6,0,6,0" VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl ItemsSource="{Binding Tiles}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <UniformGrid Columns="3"/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border x:Name="TileBorder" Margin="6" Padding="14,10" CornerRadius="8"
+                                Background="White" BorderBrush="#E5E7EB" BorderThickness="1"
+                                ToolTip="{Binding TooltipText}"
+                                MouseLeftButtonUp="Tile_Click">
+                            <StackPanel>
+                                <TextBlock Text="{Binding TypeName}" FontWeight="SemiBold" FontSize="14"
+                                           TextWrapping="Wrap"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                    <TextBlock x:Name="ValueBlock" Text="{Binding ValueText}" FontSize="28"
+                                               FontWeight="Bold" Foreground="#111827"/>
+                                    <TextBlock Text="{Binding UnitText}" FontSize="14" Foreground="#6B7280"
+                                               VerticalAlignment="Bottom" Margin="6,0,0,5"/>
+                                </StackPanel>
+                                <TextBlock Text="{Binding MeasuredText}" Foreground="#6B7280" FontSize="12"
+                                           Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                <TextBlock x:Name="StatusBlock" Text="{Binding StatusText}" FontWeight="SemiBold"
+                                           FontSize="12.5" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding FooterText}" Foreground="#6B7280" FontSize="11.5"
+                                           Margin="0,3,0,0" TextWrapping="Wrap"/>
+                                <!-- Thông báo giá trị ước tính (chỉ hiện khi có nội dung) -->
+                                <TextBlock x:Name="NoticeBlock" Text="{Binding NoticeText}" Visibility="Collapsed"
+                                           Foreground="#6B7280" FontSize="11.5" FontStyle="Italic"
+                                           TextWrapping="Wrap" Margin="0,6,0,0"/>
+                            </StackPanel>
+                        </Border>
 
-        <!-- ===== 4. Bảng cảm biến ===== -->
-        <DataGrid x:Name="SensorGrid" Grid.Row="4" Margin="12,0,12,0"
-                  SelectionChanged="SensorGrid_SelectionChanged"
-                  MouseDoubleClick="SensorGrid_MouseDoubleClick"
-                  AutoGenerateColumns="False" IsReadOnly="True"
-                  CanUserAddRows="False" CanUserDeleteRows="False" CanUserReorderColumns="False"
-                  SelectionMode="Single" SelectionUnit="FullRow"
-                  GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#E5E7EB"
-                  HeadersVisibility="Column" ColumnHeaderStyle="{StaticResource GridHeader}"
-                  Background="White" RowBackground="White"
-                  BorderBrush="#E5E7EB" BorderThickness="1"
-                  HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
-                  FontFamily="Segoe UI, Segoe UI Symbol">
-            <DataGrid.Columns>
-                <DataGridTextColumn Header="Mã cảm biến" Width="115"
-                                    Binding="{Binding Id, Mode=OneWay}"
-                                    ElementStyle="{StaticResource WrapCellBold}"/>
-                <DataGridTextColumn Header="Tên cảm biến" Width="130"
-                                    Binding="{Binding Name, Mode=OneWay}"
-                                    ElementStyle="{StaticResource WrapCell}"/>
-                <DataGridTextColumn Header="Loại cảm biến" Width="150"
-                                    Binding="{Binding TypeName, Mode=OneWay}"
-                                    ElementStyle="{StaticResource WrapCell}"/>
-                <DataGridTextColumn Header="ESP32" Width="70"
-                                    Binding="{Binding NodeId, Mode=OneWay}"
-                                    ElementStyle="{StaticResource WrapCell}"/>
-                <DataGridTextColumn Header="Giá trị đo" Width="100"
-                                    Binding="{Binding ValueText, Mode=OneWay}"
-                                    ElementStyle="{StaticResource WrapCellBold}"/>
-                <DataGridTextColumn Header="Đơn vị" Width="65"
-                                    Binding="{Binding Unit, Mode=OneWay}"
-                                    ElementStyle="{StaticResource WrapCell}"/>
-                <DataGridTextColumn Header="Thời điểm đo" Width="170"
-                                    Binding="{Binding MeasuredAtText, Mode=OneWay}"
-                                    ElementStyle="{StaticResource WrapCell}"/>
-                <DataGridTextColumn Header="Trạng thái cảm biến" Width="110"
-                                    Binding="{Binding SensorStatusText, Mode=OneWay}"
-                                    ElementStyle="{StaticResource WrapCell}"/>
+                        <DataTemplate.Triggers>
+                            <!-- Chế độ mô phỏng: thẻ bấm được -->
+                            <DataTrigger Binding="{Binding IsClickable}" Value="True">
+                                <Setter TargetName="TileBorder" Property="Cursor" Value="Hand"/>
+                            </DataTrigger>
 
-                <DataGridTemplateColumn Header="Trạng thái dữ liệu" Width="140">
-                    <DataGridTemplateColumn.CellTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding DataStatusText}" FontWeight="SemiBold"
-                                       TextWrapping="Wrap" VerticalAlignment="Center" Margin="6,4">
-                                <TextBlock.Style>
-                                    <Style TargetType="TextBlock">
-                                        <Setter Property="Foreground" Value="#374151"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding DataStatus}" Value="{x:Static m:DataStatus.Fresh}">
-                                                <Setter Property="Foreground" Value="{StaticResource NormalFg}"/>
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding DataStatus}" Value="{x:Static m:DataStatus.Stale}">
-                                                <Setter Property="Foreground" Value="{StaticResource WarningFg}"/>
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding DataStatus}" Value="{x:Static m:DataStatus.Error}">
-                                                <Setter Property="Foreground" Value="{StaticResource DisconnectedFg}"/>
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding DataStatus}" Value="{x:Static m:DataStatus.NoData}">
-                                                <Setter Property="Foreground" Value="{StaticResource NotConfiguredFg}"/>
-                                            </DataTrigger>
-                                            <!-- Đặt cuối cùng để cảm biến đã gỡ luôn có chữ xám -->
-                                            <DataTrigger Binding="{Binding IsRemoved}" Value="True">
-                                                <Setter Property="Foreground" Value="#9CA3AF"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </TextBlock.Style>
-                            </TextBlock>
-                        </DataTemplate>
-                    </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
+                            <DataTrigger Binding="{Binding HasNotice}" Value="True">
+                                <Setter TargetName="NoticeBlock" Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
 
-                <DataGridTextColumn Header="Ghi chú" Width="*" MinWidth="160"
-                                    Binding="{Binding NotesText, Mode=OneWay}"
-                                    ElementStyle="{StaticResource WrapCell}"/>
-            </DataGrid.Columns>
-        </DataGrid>
+                            <!-- Màu theo trạng thái dữ liệu (thẻ sáng) -->
+                            <DataTrigger Binding="{Binding DataStatus}" Value="{x:Static m:DataStatus.Fresh}">
+                                <Setter TargetName="TileBorder" Property="BorderBrush" Value="{StaticResource NormalBorder}"/>
+                                <Setter TargetName="TileBorder" Property="BorderThickness" Value="2"/>
+                                <Setter TargetName="StatusBlock" Property="Foreground" Value="{StaticResource NormalFg}"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding DataStatus}" Value="{x:Static m:DataStatus.Stale}">
+                                <Setter TargetName="TileBorder" Property="BorderBrush" Value="{StaticResource WarningBorder}"/>
+                                <Setter TargetName="TileBorder" Property="BorderThickness" Value="2"/>
+                                <Setter TargetName="StatusBlock" Property="Foreground" Value="{StaticResource WarningFg}"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding DataStatus}" Value="{x:Static m:DataStatus.Error}">
+                                <Setter TargetName="TileBorder" Property="BorderBrush" Value="{StaticResource DisconnectedBorder}"/>
+                                <Setter TargetName="TileBorder" Property="BorderThickness" Value="2"/>
+                                <Setter TargetName="StatusBlock" Property="Foreground" Value="{StaticResource DisconnectedFg}"/>
+                                <Setter TargetName="ValueBlock" Property="Foreground" Value="{StaticResource DisconnectedFg}"/>
+                            </DataTrigger>
+
+                            <!-- Giá trị ƯỚC TÍNH: nghiêng, màu cam (đặt sau trigger Error để ghi đè màu đỏ) -->
+                            <DataTrigger Binding="{Binding IsEstimated}" Value="True">
+                                <Setter TargetName="ValueBlock" Property="Foreground" Value="{StaticResource WarningFg}"/>
+                                <Setter TargetName="ValueBlock" Property="FontStyle" Value="Italic"/>
+                                <Setter TargetName="NoticeBlock" Property="Foreground" Value="{StaticResource WarningFg}"/>
+                            </DataTrigger>
+
+                            <!-- Thẻ mờ (đặt cuối để ghi đè): chưa kết nối -->
+                            <DataTrigger Binding="{Binding IsLit}" Value="False">
+                                <Setter TargetName="TileBorder" Property="Opacity" Value="0.45"/>
+                                <Setter TargetName="TileBorder" Property="Background" Value="#F3F4F6"/>
+                                <Setter TargetName="TileBorder" Property="BorderBrush" Value="#D1D5DB"/>
+                                <Setter TargetName="TileBorder" Property="BorderThickness" Value="1"/>
+                                <Setter TargetName="StatusBlock" Property="Foreground" Value="#6B7280"/>
+                            </DataTrigger>
+                        </DataTemplate.Triggers>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
 
         <!-- ===== 5. Chân cửa sổ ===== -->
-        <!-- ===== 5. Chân cửa sổ ===== -->
-        <Border Grid.Row="5" Margin="0,12,0,0" Background="White" BorderBrush="#E5E7EB"
+        <Border Grid.Row="4" Margin="0,12,0,0" Background="White" BorderBrush="#E5E7EB"
                 BorderThickness="0,1,0,0" Padding="16,8">
             <DockPanel>
                 <Button DockPanel.Dock="Right" Content="Đóng" Width="100" Padding="12,5"

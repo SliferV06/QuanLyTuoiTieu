@@ -21,6 +21,6 @@ public class ZoneDetail
 
     public string DataSummaryText { get; init; } = "";
 
-    public IReadOnlyList<SensorRow> ActiveRows { get; init; } = Array.Empty<SensorRow>();
-    public IReadOnlyList<SensorRow> RemovedRows { get; init; } = Array.Empty<SensorRow>();
+    /// <summary>Mỗi loại cảm biến một thẻ (sáng hoặc mờ).</summary>
+    public IReadOnlyList<SensorTile> Tiles { get; init; } = Array.Empty<SensorTile>();
 }

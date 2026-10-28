@@ -69,6 +69,99 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
         BuildAll();
     }
 
+    public string? ConnectTestSensor(string zoneCode, string sensorTypeId)
+    {
+        Zone? zone = _zones.FirstOrDefault(z => z.Code == zoneCode);
+        if (zone == null) return $"Không tìm thấy khu vực {zoneCode}.";
+
+        SensorType? type = _sensorTypes.FirstOrDefault(t => t.Id == sensorTypeId);
+        if (type == null) return "Không tìm thấy loại cảm biến.";
+
+        // Chỉ 4 loại có đơn vị và cách sinh dữ liệu mẫu; nitơ, oxy chưa có thông tin kỹ thuật thực tế
+        int kind = Array.FindIndex(PerZoneKinds, k => k.TypeId == sensorTypeId);
+        if (kind < 0)
+        {
+            return $"Loại \"{type.Name}\" chưa có đơn vị và phương pháp đo " +
+                   "(chờ thông tin kỹ thuật của cảm biến thực tế) nên chưa thể kết nối thử.";
+        }
+
+        var inZone = _sensors.Where(s => s.ZoneCode == zoneCode && s.SensorTypeId == sensorTypeId).ToList();
+        int zoneIndex = (zone.Row - 1) * Zone.MaxColumns + (zone.Column - 1);
+        DateTime now = DateTime.UtcNow;
+
+        // Cảm biến đã đăng ký nhưng chưa có dữ liệu: cho nó dữ liệu mô phỏng
+        Sensor? existing = inZone.FirstOrDefault(s => s.Status != SensorStatus.Removed);
+        if (existing != null)
+        {
+            _seeds[existing.Id] = new SeedInfo(Feed.Fresh, kind, zoneIndex);
+            Measurement? measurement = CreateMeasurement(existing.Id, _seeds[existing.Id], now);
+            if (measurement != null) _latest[existing.Id] = measurement;
+            return null;
+        }
+
+        // Đã gỡ vì ESP32 ngừng sử dụng: phải dùng lại ESP32 (không đổi nút ESP32)
+        Sensor? removedWithNode = inZone.FirstOrDefault(
+            s => s.Status == SensorStatus.Removed && s.RemovedWithNodeId != null);
+        if (removedWithNode != null)
+        {
+            return $"Cảm biến này đã gỡ do ESP32 {removedWithNode.RemovedWithNodeId} ngừng sử dụng. " +
+                   "Hãy dùng lại ESP32 đó trong Danh sách ESP32.";
+        }
+
+        // Chưa có: tạo cảm biến mới, gán ESP32 đang phụ trách khu vực (hoặc ESP32 hoạt động đầu tiên)
+        string? nodeId = _sensors
+            .Where(s => s.ZoneCode == zoneCode && s.Status != SensorStatus.Removed)
+            .GroupBy(s => s.NodeId)
+            .OrderByDescending(g => g.Count())
+            .Select(g => g.Key)
+            .FirstOrDefault(id => _nodes.Any(n => n.Id == id && n.IsActive));
+
+        nodeId ??= _nodes.Where(n => n.IsActive).OrderBy(n => n.Id).Select(n => n.Id).FirstOrDefault();
+        if (nodeId == null)
+            return "Chưa có ESP32 nào đang hoạt động. Hãy thêm ESP32 trong Danh sách ESP32 trước.";
+
+        int serial = 1;
+        string id;
+        do
+        {
+            id = $"{zoneCode}-{PerZoneKinds[kind].Abbr}-{serial:00}";
+            serial++;
+        }
+        while (_sensors.Any(s => string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase)));
+
+        var sensor = new Sensor
+        {
+            Id = id,
+            Name = $"{PerZoneKinds[kind].Label} {zoneCode}",
+            SensorTypeId = sensorTypeId,
+            ZoneCode = zoneCode,
+            NodeId = nodeId,
+            Unit = type.DefaultUnit,
+            Status = SensorStatus.Active,
+            Notes = "Kết nối thử (mô phỏng)",
+            InstalledAt = now
+        };
+        _sensors.Add(sensor);
+        _seeds[id] = new SeedInfo(Feed.Fresh, kind, zoneIndex);
+
+        Measurement? first = CreateMeasurement(id, _seeds[id], now);
+        if (first != null) _latest[id] = first;
+        return null;
+    }
+
+    public string? DisconnectTestSensor(string zoneCode, string sensorTypeId)
+    {
+        var active = _sensors
+            .Where(s => s.ZoneCode == zoneCode && s.SensorTypeId == sensorTypeId && s.Status != SensorStatus.Removed)
+            .ToList();
+
+        if (active.Count == 0) return "Cảm biến này chưa kết nối.";
+
+        foreach (Sensor sensor in active)
+            DeleteSensor(sensor.Id);
+
+        return null;
+    }
     public void FillAllZones()
     {
         DateTime now = DateTime.UtcNow;
@@ -363,7 +456,7 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
                     Code = code,
                     Row = row,
                     Column = col,
-                    Name = $"Khu vực {code}",
+                    Name = SampleZoneName(code, zoneIndex),
                     Description = "Khu vực mô phỏng"
                 };
                 _zones.Add(zone);
@@ -411,6 +504,15 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
     ///  - Với khu vực dữ liệu mới: % 11 == 2 có 1 bản ghi lỗi; % 9 == 6 có 1 cảm biến dữ liệu cũ;
     ///    % 23 == 0 có 1 cảm biến "Có lỗi".
     /// </summary>
+    /// <summary>
+    /// Dựng một khu vực mẫu cho các ô E01..L12. Tình huống chọn theo zoneIndex (cố định, không ngẫu nhiên):
+    ///  - zoneIndex % 17 == 3  : chưa có cảm biến (Chưa cấu hình)
+    ///  - zoneIndex % 13 == 4  : mọi cảm biến có dữ liệu cũ (Mất kết nối)
+    ///  - zoneIndex % 29 == 11 : mọi cảm biến chưa có dữ liệu (Mất kết nối)
+    ///  - Với khu vực dữ liệu mới: % 11 == 2 có 1 bản ghi lỗi; % 9 == 6 có 1 cảm biến dữ liệu cũ;
+    ///    % 23 == 0 có 1 cảm biến "Có lỗi".
+    /// Mỗi khu vực mỗi loại cảm biến chỉ có 1 cảm biến.
+    /// </summary>
     private void BuildExtraZone(int row, int col, int zoneIndex, DateTime now)
     {
         string code = FarmOverviewService.MakeCode(row, col);
@@ -420,7 +522,7 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
             Code = code,
             Row = row,
             Column = col,
-            Name = $"Khu vực {code}",
+            Name = SampleZoneName(code, zoneIndex),
             Description = "Khu vực mô phỏng"
         };
         _zones.Add(zone);
@@ -435,26 +537,20 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
         if (zoneIndex % 13 == 4) baseFeed = Feed.Stale;
         else if (zoneIndex % 29 == 11) baseFeed = Feed.None;
 
-        int copies = zoneIndex % 20 == 7 ? 3 : 1;   // 3 cảm biến mỗi loại = 12 cảm biến
-
         for (int kind = 0; kind < PerZoneKinds.Length; kind++)
         {
-            for (int serial = 1; serial <= copies; serial++)
+            var status = SensorStatus.Active;
+            Feed feed = baseFeed;
+
+            // Tình huống riêng của từng cảm biến, chỉ áp dụng cho khu vực có dữ liệu mới
+            if (baseFeed == Feed.Fresh)
             {
-                var status = SensorStatus.Active;
-                Feed feed = baseFeed;
-
-                // Tình huống riêng của từng cảm biến, chỉ áp dụng cho khu vực có dữ liệu mới
-                if (baseFeed == Feed.Fresh && serial == 1)
-                {
-                    if (kind == 2 && zoneIndex % 11 == 2) feed = Feed.Error;
-                    else if (kind == 3 && zoneIndex % 9 == 6) feed = Feed.Stale;
-                    else if (kind == 1 && zoneIndex % 23 == 0) { status = SensorStatus.Faulty; feed = Feed.Error; }
-                }
-
-                Sensor sensor = AddSensor(zone, nodeId, kind, zoneIndex, serial, status, feed, now);
-                if (copies > 1) sensor.Name += $" ({serial})";
+                if (kind == 2 && zoneIndex % 11 == 2) feed = Feed.Error;
+                else if (kind == 3 && zoneIndex % 9 == 6) feed = Feed.Stale;
+                else if (kind == 1 && zoneIndex % 23 == 0) { status = SensorStatus.Faulty; feed = Feed.Error; }
             }
+
+            AddSensor(zone, nodeId, kind, zoneIndex, 1, status, feed, now);
         }
     }
 
@@ -523,7 +619,7 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
                 m.Value = SampleValue(seed.Kind, seed.ZoneIndex);
                 break;
             case Feed.Stale:
-                m.MeasuredAt = now.AddHours(-3);
+                m.MeasuredAt = now - (SyncSettings.StaleAfter + TimeSpan.FromMinutes(30));
                 m.Value = SampleValue(seed.Kind, seed.ZoneIndex);
                 break;
             case Feed.Error:
@@ -534,7 +630,17 @@ public class MockFarmDataSource : IFarmDataSource, ISimulationControls
         }
         return m;
     }
-
+    /// <summary>
+    /// Tên khu vực mẫu (cố định, không ngẫu nhiên): ngắn, dài vừa, rất dài và để trống,
+    /// để thử cách hiển thị tên trong ô.
+    /// </summary>
+    private static string SampleZoneName(string code, int zoneIndex)
+    {
+        if (code == "A02") return "Vườn thí nghiệm số hai";                                       // xuống 2 dòng
+        if (code == "A03") return "Vườn thí nghiệm tưới nước hoạt hóa lô đối chứng số ba";       // hết chỗ, có dấu ...
+        if (zoneIndex % 7 == 5) return "";                                                        // không có tên
+        return $"Lô {zoneIndex + 1}";
+    }
     // Giá trị mô phỏng cố định, chỉ để thử giao diện.
     private static double SampleValue(int kind, int zoneIndex) => kind switch
     {

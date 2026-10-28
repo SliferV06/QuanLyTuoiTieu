@@ -1,4 +1,5 @@
-﻿using System.Windows;
+﻿using System.Globalization;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -36,6 +37,7 @@ public partial class MainWindow : Window
 
     private List<ZoneCell> _cells = new();
     private bool _isReady;                       // tránh xử lý sự kiện khi cửa sổ đang khởi tạo
+    private bool _applyingInterval;              // tránh áp dụng chu kỳ chồng lặp (Enter rồi mất tiêu điểm)
     private double _wheelRemainder;              // gom các nấc lăn chuột nhỏ (bàn di chuột) thành từng hàng
 
     public MainWindow()
@@ -55,8 +57,10 @@ public partial class MainWindow : Window
             ? "Nguồn: dữ liệu mô phỏng"
             : $"Nguồn: {_syncService.SourceName}";
         SourceText.ToolTip = _syncService.IsSimulated ? "Dữ liệu mô phỏng, chưa kết nối máy chủ" : null;
-        AutoSyncCheck.Content =
-            $"Tự đồng bộ mỗi {(int)SyncService.DefaultAutoSyncInterval.TotalMinutes} phút";
+
+        // Chu kỳ đồng bộ đã lưu (phút hoặc giờ)
+        UnitCombo.SelectedIndex = SyncSettings.UseHours ? 1 : 0;   // _isReady còn false nên chưa chạy xử lý
+        ShowInterval();
 
         // Tính lại trạng thái khu vực theo thời gian
         _statusTimer = new DispatcherTimer { Interval = StatusRecalcInterval };
@@ -277,6 +281,91 @@ public partial class MainWindow : Window
             : local.ToString("HH:mm:ss dd/MM/yyyy");
     }
 
+    // ===== Chu kỳ đồng bộ tự chọn (ô số + phút/giờ) =====
+
+    private bool UseHours => UnitCombo.SelectedIndex == 1;
+
+    /// <summary>Hiển thị chu kỳ đang dùng trong ô số, theo đơn vị đang chọn.</summary>
+    private void ShowInterval()
+    {
+        double minutes = SyncSettings.Interval.TotalMinutes;
+        double shown = UseHours ? minutes / 60.0 : minutes;
+        IntervalBox.Text = shown.ToString("0.##", CultureInfo.CurrentCulture);
+    }
+
+    /// <summary>Đọc ô số, kiểm tra và áp dụng. Giá trị sai thì báo lỗi và trả ô về giá trị đang dùng.</summary>
+    private void ApplyIntervalFromBox()
+    {
+        if (_applyingInterval) return;
+        _applyingInterval = true;
+
+        try
+        {
+            // Chấp nhận cả dấu phẩy và dấu chấm thập phân
+            string text = IntervalBox.Text.Trim().Replace(',', '.');
+            if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
+                || double.IsNaN(value) || double.IsInfinity(value))
+            {
+                ShowIntervalError();
+                return;
+            }
+
+            double minutes = Math.Round(value * (UseHours ? 60 : 1));
+            if (minutes < SyncSettings.MinInterval.TotalMinutes || minutes > SyncSettings.MaxInterval.TotalMinutes)
+            {
+                ShowIntervalError();
+                return;
+            }
+
+            TimeSpan interval = TimeSpan.FromMinutes(minutes);
+            if (interval == SyncSettings.Interval)
+            {
+                ShowInterval();   // không đổi, chỉ chuẩn hóa chữ hiển thị
+                return;
+            }
+
+            SyncSettings.SetInterval(interval);            // đổi và lưu tệp cài đặt
+            _syncService.SetAutoSyncInterval(interval);    // hẹn lại mốc đồng bộ tự động
+            ShowInterval();
+            RecalculateStatusesIfChanged();                // ngưỡng dữ liệu cũ đổi theo chu kỳ
+        }
+        finally
+        {
+            _applyingInterval = false;
+        }
+    }
+
+    private void ShowIntervalError()
+    {
+        MessageBox.Show("Chu kỳ phải từ 1 phút đến 24 giờ (ví dụ 20 phút hoặc 1,5 giờ).",
+            "Chu kỳ không hợp lệ", MessageBoxButton.OK, MessageBoxImage.Warning);
+        ShowInterval();
+    }
+
+    private void IntervalBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+
+        ApplyIntervalFromBox();
+        IntervalBox.SelectAll();
+        e.Handled = true;
+    }
+
+    private void IntervalBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!_isReady) return;
+        ApplyIntervalFromBox();
+    }
+
+    private void UnitCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_isReady) return;
+
+        // Đổi đơn vị: giữ nguyên khoảng thời gian, chỉ đổi cách hiển thị
+        SyncSettings.SetUseHours(UseHours);
+        ShowInterval();
+    }
+
     // ===== Tìm kiếm và lọc =====
 
     private void ApplyFilter()
@@ -379,7 +468,7 @@ public partial class MainWindow : Window
             $"Tự động đồng bộ: {autoText}\n" +
             "Chu kỳ đo của node ESP32 (giả định): 10 phút\n" +
             $"Thời gian chờ tối đa mỗi lần đồng bộ: {SyncService.Timeout.TotalSeconds:0} giây\n" +
-            $"Dữ liệu coi là cũ sau: {FarmOverviewService.StaleAfter.TotalMinutes:0} phút\n" +
+            $"Dữ liệu coi là cũ sau: {FarmOverviewService.StaleAfter.TotalMinutes:0} phút (chu kỳ đồng bộ + 1 giờ)\n" +
             $"Trạng thái khu vực được tính lại mỗi {StatusRecalcInterval.TotalSeconds:0} giây theo giờ hiện tại";
 
         MessageBox.Show(message, "Thông tin đồng bộ", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -415,8 +504,9 @@ public partial class MainWindow : Window
     {
         if (_simulation == null) return;
 
-        _simulation.AgeMeasurements(TimeSpan.FromHours(1));
-        LoadView();   // tính lại trạng thái ngay với dữ liệu "già" thêm 1 giờ
+        // Tua vượt đúng ngưỡng dữ liệu cũ hiện tại (chu kỳ + 1 giờ) cộng 1 phút
+        _simulation.AgeMeasurements(FarmOverviewService.StaleAfter + TimeSpan.FromMinutes(1));
+        LoadView();   // tính lại trạng thái ngay với dữ liệu đã "già"
     }
 
     private void FillZones_Click(object sender, RoutedEventArgs e)

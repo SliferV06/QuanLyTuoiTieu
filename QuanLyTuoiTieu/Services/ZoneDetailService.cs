@@ -4,7 +4,7 @@ using QuanLyTuoiTieu.ViewModels;
 
 namespace QuanLyTuoiTieu.Services;
 
-/// <summary>Dựng dữ liệu chi tiết của một khu vực từ nguồn dữ liệu.</summary>
+/// <summary>Dựng dữ liệu chi tiết của một khu vực (kể cả các thẻ cảm biến) từ nguồn dữ liệu.</summary>
 public class ZoneDetailService
 {
     private readonly IFarmDataSource _dataSource;
@@ -22,17 +22,13 @@ public class ZoneDetailService
 
         DateTime nowUtc = DateTime.UtcNow;
         var latest = _dataSource.GetLatestMeasurements();
-        var typeById = _dataSource.GetSensorTypes().ToDictionary(t => t.Id);
         var nodeById = _dataSource.GetNodes().ToDictionary(n => n.Id);
+        var estimator = new NeighborEstimator(_dataSource, nowUtc);
 
         var zoneSensors = _dataSource.GetSensors().Where(s => s.ZoneCode == zoneCode).ToList();
         var activeSensors = zoneSensors.Where(s => s.Status != SensorStatus.Removed).ToList();
-        var removedSensors = zoneSensors.Where(s => s.Status == SensorStatus.Removed).ToList();
 
         ZoneStatus status = FarmOverviewService.CalculateZoneStatus(zone, activeSensors, latest, nowUtc);
-
-        var activeRows = activeSensors.Select(s => ToRow(s, typeById, latest, nowUtc)).ToList();
-        var removedRows = removedSensors.Select(s => ToRow(s, typeById, latest, nowUtc)).ToList();
 
         // ESP32 liên quan = các node phụ trách cảm biến đang quản lý của khu vực
         var nodeIds = activeSensors.Select(s => s.NodeId).Distinct().OrderBy(id => id).ToList();
@@ -40,79 +36,145 @@ public class ZoneDetailService
             ? "Chưa có ESP32 nào"
             : string.Join(", ", nodeIds.Select(id => nodeById.ContainsKey(id) ? id : $"{id} (chưa khai báo)"));
 
-        string dataSummary = activeRows.Count == 0
+        var dataStatuses = activeSensors
+            .Select(s => FarmOverviewService.GetDataStatus(latest, s.Id, nowUtc))
+            .ToList();
+
+        string dataSummary = activeSensors.Count == 0
             ? "Chưa có cảm biến"
-            : $"Mới: {activeRows.Count(r => r.DataStatus == DataStatus.Fresh)} | " +
-              $"Cũ: {activeRows.Count(r => r.DataStatus == DataStatus.Stale)} | " +
-              $"Chưa có dữ liệu: {activeRows.Count(r => r.DataStatus == DataStatus.NoData)} | " +
-              $"Lỗi: {activeRows.Count(r => r.DataStatus == DataStatus.Error)}";
+            : $"Mới: {dataStatuses.Count(d => d == DataStatus.Fresh)} | " +
+              $"Cũ: {dataStatuses.Count(d => d == DataStatus.Stale)} | " +
+              $"Chưa có dữ liệu: {dataStatuses.Count(d => d == DataStatus.NoData)} | " +
+              $"Lỗi: {dataStatuses.Count(d => d == DataStatus.Error)}";
+
+        // Mỗi loại cảm biến một thẻ, theo thứ tự danh mục loại cảm biến
+        var tiles = _dataSource.GetSensorTypes()
+            .Select(type => BuildTile(type, zoneCode, zoneSensors, latest, nowUtc, estimator))
+            .ToList();
 
         return new ZoneDetail
         {
             Code = zone.Code,
-            Name = zone.Name,
+            Name = string.IsNullOrWhiteSpace(zone.Name) ? "(chưa đặt tên)" : zone.Name,
             DescriptionText = string.IsNullOrWhiteSpace(zone.Description) ? "(không có)" : zone.Description,
             Status = status,
             NodesText = nodesText,
-            ActiveSensorCount = activeRows.Count,
+            ActiveSensorCount = activeSensors.Count,
             DataSummaryText = dataSummary,
-            ActiveRows = activeRows,
-            RemovedRows = removedRows
+            Tiles = tiles
         };
     }
 
-    private static SensorRow ToRow(
-        Sensor sensor,
-        IReadOnlyDictionary<string, SensorType> typeById,
-        IReadOnlyDictionary<string, Measurement> latest,
-        DateTime nowUtc)
+    private static SensorTile BuildTile(
+        SensorType type, string zoneCode, IReadOnlyList<Sensor> zoneSensors,
+        IReadOnlyDictionary<string, Measurement> latest, DateTime nowUtc, NeighborEstimator estimator)
     {
-        latest.TryGetValue(sensor.Id, out Measurement? m);
-        DataStatus dataStatus = FarmOverviewService.GetDataStatus(latest, sensor.Id, nowUtc);
-        bool isRemoved = sensor.Status == SensorStatus.Removed;
+        var ofType = zoneSensors.Where(s => s.SensorTypeId == type.Id).ToList();
+        var active = ofType.Where(s => s.Status != SensorStatus.Removed).OrderBy(s => s.Id).ToList();
 
-        // Giá trị: không bao giờ thay dữ liệu thiếu/lỗi bằng số 0
-        string valueText;
-        if (m == null) valueText = "Chưa có dữ liệu";
-        else if (m.IsError) valueText = "Lỗi";
-        else if (m.Value is double v) valueText = v.ToString("0.##", CultureInfo.CurrentCulture);
-        else valueText = "Chưa có dữ liệu";
+        // Thẻ sáng: cảm biến đang quản lý và đã có bản ghi đo
+        Sensor? connected = active.FirstOrDefault(s => latest.ContainsKey(s.Id));
+        if (connected != null)
+            return BuildLitTile(type, zoneCode, connected, latest[connected.Id], latest, nowUtc, estimator);
 
-        string measuredAtText = m == null
-            ? "—"
-            : $"{m.MeasuredAt.ToLocalTime().ToString("HH:mm:ss dd/MM/yyyy", CultureInfo.InvariantCulture)} ({AgeText(nowUtc - m.MeasuredAt)})";
-
-        string dataStatusText = isRemoved
-            ? "— (đã gỡ)"
-            : $"{StatusDisplay.DataStatusIcon(dataStatus)} {StatusDisplay.DataStatusText(dataStatus)}";
-
-        var notes = new List<string>();
-        if (!string.IsNullOrWhiteSpace(sensor.Notes)) notes.Add(sensor.Notes);
-        if (m is { IsError: true }) notes.Add($"Lỗi: {m.ErrorMessage}");
-        if (isRemoved)
+        // Thẻ mờ: nêu lý do
+        string reason;
+        if (active.Count > 0)
         {
-            string removedDate = sensor.RemovedAt?.ToLocalTime().ToString("dd/MM/yyyy", CultureInfo.InvariantCulture) ?? "không rõ";
-            notes.Add($"Đã gỡ ngày {removedDate}");
-            if (!string.IsNullOrWhiteSpace(sensor.RemovalReason)) notes.Add($"Lý do: {sensor.RemovalReason}");
-            if (!string.IsNullOrWhiteSpace(sensor.ReplacedBySensorId)) notes.Add($"Thay bằng: {sensor.ReplacedBySensorId}");
+            reason = "Chưa có dữ liệu";   // đã đăng ký nhưng chưa gửi dữ liệu
+        }
+        else
+        {
+            Sensor? removed = ofType
+                .Where(s => s.Status == SensorStatus.Removed)
+                .OrderByDescending(s => s.RemovedAt)
+                .FirstOrDefault();
+
+            reason = removed == null
+                ? "Chưa kết nối"
+                : removed.RemovedWithNodeId != null
+                    ? $"ESP32 {removed.RemovedWithNodeId} ngừng sử dụng"
+                    : "Đã gỡ";
         }
 
-        return new SensorRow
+        return new SensorTile
         {
-            Id = sensor.Id,
-            Name = sensor.Name,
-            TypeName = typeById.TryGetValue(sensor.SensorTypeId, out SensorType? type)
-                ? type.Name
-                : $"{sensor.SensorTypeId} (chưa khai báo)",
-            NodeId = sensor.NodeId,
+            TypeId = type.Id,
+            TypeName = type.Name,
+            IsLit = false,
+            ValueText = "—",
+            DataStatus = DataStatus.NoData,
+            StatusText = reason,
+            TooltipText = $"{type.Name}: {reason}"
+        };
+    }
+
+    private static SensorTile BuildLitTile(
+        SensorType type, string zoneCode, Sensor sensor, Measurement m,
+        IReadOnlyDictionary<string, Measurement> latest, DateTime nowUtc, NeighborEstimator estimator)
+    {
+        DataStatus ds = FarmOverviewService.GetDataStatus(latest, sensor.Id, nowUtc);
+
+        // Mặc định: không bao giờ thay dữ liệu lỗi hoặc thiếu bằng số 0
+        bool hasValue = !m.IsError && m.Value.HasValue;
+        string valueText = m.IsError
+            ? "Lỗi"
+            : hasValue ? m.Value!.Value.ToString("0.##", CultureInfo.CurrentCulture) : "—";
+        string unitText = hasValue && !string.IsNullOrWhiteSpace(sensor.Unit) ? sensor.Unit : "";
+
+        // Cảm biến lỗi hoặc hỏng: hiển thị giá trị ƯỚC TÍNH từ khu vực lân cận (nếu bật và đủ nguồn)
+        string notice = "";
+        bool isEstimated = false;
+        bool sensorFault = sensor.Status == SensorStatus.Faulty;
+
+        if ((m.IsError || sensorFault) && SyncSettings.EstimateEnabled)
+        {
+            EstimateResult estimate = estimator.Estimate(zoneCode, type.Id, sensor.Unit);
+
+            if (estimate.Value is double estimated)
+            {
+                valueText = "≈ " + estimated.ToString("0.##", CultureInfo.CurrentCulture);
+                unitText = string.IsNullOrWhiteSpace(sensor.Unit) ? "" : sensor.Unit;
+                isEstimated = true;
+                notice = $"Cảm biến lỗi: giá trị ước tính từ {estimate.SourceZones.Count} khu vực lân cận " +
+                         $"({string.Join(", ", estimate.SourceZones)}), không phải số đo thật.";
+            }
+            else
+            {
+                notice = estimate.Message ?? "";
+            }
+        }
+
+        // Vẫn thông báo lỗi cảm biến như trước
+        string statusText = $"{StatusDisplay.DataStatusIcon(ds)} {StatusDisplay.DataStatusText(ds)}";
+        if (sensorFault) statusText += " · cảm biến báo lỗi";
+
+        string footer = $"ESP32: {sensor.NodeId}";
+        if (m.IsError && !string.IsNullOrWhiteSpace(m.ErrorMessage)) footer += $" · {m.ErrorMessage}";
+
+        DateTime local = m.MeasuredAt.ToLocalTime();
+        string time = local.Date == DateTime.Today
+            ? local.ToString("HH:mm:ss", CultureInfo.InvariantCulture)
+            : local.ToString("HH:mm:ss dd/MM/yyyy", CultureInfo.InvariantCulture);
+        string measured = $"Đo lúc {time} · {AgeText(nowUtc - m.MeasuredAt)}";
+
+        string tooltip = $"{type.Name} - khu vực {zoneCode}\n{measured}\n{statusText}\n{footer}";
+        if (notice.Length > 0) tooltip += $"\n{notice}";
+
+        return new SensorTile
+        {
+            TypeId = type.Id,
+            TypeName = type.Name,
+            IsLit = true,
             ValueText = valueText,
-            Unit = string.IsNullOrWhiteSpace(sensor.Unit) ? "—" : sensor.Unit,
-            MeasuredAtText = measuredAtText,
-            SensorStatusText = StatusDisplay.SensorStatusText(sensor.Status),
-            DataStatus = dataStatus,
-            DataStatusText = dataStatusText,
-            NotesText = string.Join(". ", notes),
-            IsRemoved = isRemoved
+            UnitText = unitText,
+            MeasuredText = measured,
+            DataStatus = ds,
+            StatusText = statusText,
+            FooterText = footer,
+            NoticeText = notice,
+            IsEstimated = isEstimated,
+            TooltipText = tooltip
         };
     }
 

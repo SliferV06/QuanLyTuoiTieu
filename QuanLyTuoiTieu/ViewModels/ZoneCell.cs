@@ -33,7 +33,17 @@ public class ZoneCell : INotifyPropertyChanged
 
     public string StatusIcon => StatusDisplay.ZoneStatusIcon(Status);
 
-    public string ToolTipText => Zone == null
-        ? $"{Code}: chưa có khu vực\nNhấn để thêm khu vực"
-        : $"{Code} - {Zone.Name}\nTrạng thái: {StatusText}\nSố cảm biến: {SensorCount}";
+    /// <summary>Tên khu vực hiển thị dưới mã trong ô. Không có tên (hoặc ô trống) thì để rỗng, không hiện gì.</summary>
+    public string NameText => Zone?.Name.Trim() ?? "";
+
+    public string ToolTipText
+    {
+        get
+        {
+            if (Zone == null) return $"{Code}: chưa có khu vực\nNhấn để thêm khu vực";
+
+            string title = NameText.Length == 0 ? Code : $"{Code} - {NameText}";
+            return $"{title}\nTrạng thái: {StatusText}\nSố cảm biến: {SensorCount}";
+        }
+    }
 }

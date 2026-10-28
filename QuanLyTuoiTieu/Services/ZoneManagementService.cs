@@ -66,7 +66,7 @@ public class ZoneManagementService
                 Code = code,
                 Row = code[0] - 'A' + 1,
                 Column = int.Parse(code.Substring(1)),
-                Name = name!.Trim(),
+                Name = (name ?? "").Trim(),
                 Description = CleanDescription(description)
             });
             return null;
@@ -90,7 +90,7 @@ public class ZoneManagementService
             _dataSource.UpdateZone(new Zone
             {
                 Code = code,
-                Name = name!.Trim(),
+                Name = (name ?? "").Trim(),
                 Description = CleanDescription(description)
             });
             return null;
@@ -139,8 +139,8 @@ public class ZoneManagementService
 
     private static string? ValidateText(string? name, string? description)
     {
-        if (string.IsNullOrWhiteSpace(name)) return "Vui lòng nhập tên khu vực.";
-        if (name.Trim().Length > MaxNameLength) return $"Tên khu vực tối đa {MaxNameLength} ký tự.";
+        // Tên không bắt buộc: để trống thì ô trên sơ đồ chỉ hiện mã
+        if ((name ?? "").Trim().Length > MaxNameLength) return $"Tên khu vực tối đa {MaxNameLength} ký tự.";
         if ((description ?? "").Trim().Length > MaxDescriptionLength) return $"Mô tả tối đa {MaxDescriptionLength} ký tự.";
         return null;
     }

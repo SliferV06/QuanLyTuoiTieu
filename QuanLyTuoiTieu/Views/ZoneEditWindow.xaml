@@ -14,13 +14,14 @@
 
         <StackPanel Margin="20,16,20,8">
             <TextBlock Text="Mã khu vực" Foreground="#6B7280"/>
-            <ComboBox x:Name="CodeCombo" Margin="0,4,0,0" Padding="6,4"
-                      SelectionChanged="CodeCombo_SelectionChanged"/>
+            <ComboBox x:Name="CodeCombo" Margin="0,4,0,0" Padding="6,4"/>
             <TextBlock x:Name="CodeText" Visibility="Collapsed" FontWeight="Bold" FontSize="15" Margin="0,4,0,0"/>
             <TextBlock x:Name="CodeHint" Foreground="#6B7280" FontSize="11.5" Margin="0,3,0,0"/>
 
-            <TextBlock Text="Tên khu vực *" Foreground="#6B7280" Margin="0,12,0,0"/>
+            <TextBlock Text="Tên khu vực (không bắt buộc)" Foreground="#6B7280" Margin="0,12,0,0"/>
             <TextBox x:Name="NameBox" Margin="0,4,0,0" Padding="4,5" MaxLength="100"/>
+            <TextBlock Foreground="#6B7280" FontSize="11.5" TextWrapping="Wrap" Margin="0,3,0,0"
+                       Text="Nên đặt tên ngắn (khoảng 15 ký tự) để hiển thị đủ trong ô. Để trống thì ô chỉ hiện mã."/>
 
             <TextBlock Text="Mô tả (không bắt buộc)" Foreground="#6B7280" Margin="0,12,0,0"/>
             <TextBox x:Name="DescriptionBox" Margin="0,4,0,0" Padding="4,5" Height="70"

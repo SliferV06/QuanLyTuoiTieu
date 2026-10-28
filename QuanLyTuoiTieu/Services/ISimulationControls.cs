@@ -20,4 +20,16 @@ public interface ISimulationControls
 
     /// <summary>Đặt lại toàn bộ về dữ liệu mẫu ban đầu (48 khu vực). Mọi thay đổi của người dùng bị mất.</summary>
     void ResetSampleData();
+
+    /// <summary>
+    /// Kết nối thử cảm biến loại sensorTypeId ở khu vực (tạo cảm biến mô phỏng có dữ liệu).
+    /// Trả về null nếu thành công, hoặc thông báo lỗi tiếng Việt.
+    /// </summary>
+    string? ConnectTestSensor(string zoneCode, string sensorTypeId);
+
+    /// <summary>
+    /// Ngắt kết nối thử: xóa cảm biến loại sensorTypeId đang quản lý ở khu vực.
+    /// Trả về null nếu thành công, hoặc thông báo lỗi tiếng Việt.
+    /// </summary>
+    string? DisconnectTestSensor(string zoneCode, string sensorTypeId);
 }
