@@ -22,14 +22,16 @@ public class ZoneDetailService
 
         DateTime nowUtc = DateTime.UtcNow;
         var latest = _dataSource.GetLatestMeasurements();
-        var lastValid = _dataSource.GetLastValidMeasurements();
         var nodeById = _dataSource.GetNodes().ToDictionary(n => n.Id);
+        var estimator = new NeighborEstimator(_dataSource, nowUtc);
+        bool estimateStale = SyncSettings.EstimateStaleEnabled;
 
         var zoneSensors = _dataSource.GetSensors().Where(s => s.ZoneCode == zoneCode).ToList();
         var activeSensors = zoneSensors.Where(s => s.Status != SensorStatus.Removed).ToList();
 
         ZonePositionInfo position = new PositionService(_dataSource).GetInfo(zoneCode, nowUtc);
 
+        // Trạng thái khu vực luôn tính theo dữ liệu THẬT (giá trị ước tính không làm đổi trạng thái)
         ZoneStatus status = FarmOverviewService.CalculateZoneStatus(
             zone, activeSensors, latest, nowUtc, position.IsMoved);
 
@@ -52,7 +54,7 @@ public class ZoneDetailService
 
         // Mỗi loại cảm biến một thẻ, theo thứ tự danh mục loại cảm biến
         var tiles = _dataSource.GetSensorTypes()
-            .Select(type => BuildTile(type, zoneCode, zoneSensors, latest, lastValid, nowUtc))
+            .Select(type => BuildTile(type, zoneCode, zoneSensors, latest, nowUtc, estimator, estimateStale))
             .ToList();
 
         return new ZoneDetail
@@ -71,8 +73,8 @@ public class ZoneDetailService
 
     private static SensorTile BuildTile(
         SensorType type, string zoneCode, IReadOnlyList<Sensor> zoneSensors,
-        IReadOnlyDictionary<string, Measurement> latest,
-        IReadOnlyDictionary<string, Measurement> lastValid, DateTime nowUtc)
+        IReadOnlyDictionary<string, Measurement> latest, DateTime nowUtc,
+        NeighborEstimator estimator, bool estimateStale)
     {
         var ofType = zoneSensors.Where(s => s.SensorTypeId == type.Id).ToList();
         var active = ofType.Where(s => s.Status != SensorStatus.Removed).OrderBy(s => s.Id).ToList();
@@ -81,7 +83,7 @@ public class ZoneDetailService
         if (active.Count > 0)
         {
             Sensor sensor = active.FirstOrDefault(s => latest.ContainsKey(s.Id)) ?? active[0];
-            return BuildLitTile(type, zoneCode, sensor, latest, lastValid, nowUtc);
+            return BuildLitTile(type, zoneCode, sensor, latest, nowUtc, estimator, estimateStale);
         }
 
         // Thẻ mờ: nêu lý do
@@ -110,14 +112,14 @@ public class ZoneDetailService
 
     private static SensorTile BuildLitTile(
         SensorType type, string zoneCode, Sensor sensor,
-        IReadOnlyDictionary<string, Measurement> latest,
-        IReadOnlyDictionary<string, Measurement> lastValid, DateTime nowUtc)
+        IReadOnlyDictionary<string, Measurement> latest, DateTime nowUtc,
+        NeighborEstimator estimator, bool estimateStale)
     {
         bool sensorFault = sensor.Status == SensorStatus.Faulty;
         string footer = $"ESP32: {sensor.NodeId}";
         string unit = string.IsNullOrWhiteSpace(sensor.Unit) ? "" : sensor.Unit;
 
-        // Đã đăng ký nhưng chưa gửi dữ liệu: vẫn sáng, giá trị "—"
+        // Đã đăng ký nhưng chưa gửi dữ liệu: vẫn sáng, giá trị "—" (không ước tính)
         if (!latest.TryGetValue(sensor.Id, out Measurement? m))
         {
             string noDataStatus =
@@ -139,27 +141,17 @@ public class ZoneDetailService
         }
 
         DataStatus ds = FarmOverviewService.GetDataStatus(latest, sensor.Id, nowUtc);
+        bool isStale = ds == DataStatus.Stale;
 
+        // Hiển thị mặc định theo bản ghi THẬT
         string valueText;
         string unitText = "";
         string measured;
-        bool isOldValue = false;
 
         if (m.IsError)
         {
-            // Bản ghi mới nhất bị lỗi: hiển thị giá trị hợp lệ CUỐI CÙNG (dữ liệu cũ), không dùng số 0
-            if (lastValid.TryGetValue(sensor.Id, out Measurement? old) && old.Value is double oldValue)
-            {
-                valueText = oldValue.ToString("0.##", CultureInfo.CurrentCulture);
-                unitText = unit;
-                isOldValue = true;
-                measured = $"Giá trị hợp lệ cuối lúc {TimeText(old.MeasuredAt)} · {AgeText(nowUtc - old.MeasuredAt)}";
-            }
-            else
-            {
-                valueText = "Lỗi";
-                measured = $"Bản ghi lỗi lúc {TimeText(m.MeasuredAt)} · {AgeText(nowUtc - m.MeasuredAt)}";
-            }
+            valueText = "Lỗi";   // không dùng số 0
+            measured = $"Bản ghi lỗi lúc {TimeText(m.MeasuredAt)} · {AgeText(nowUtc - m.MeasuredAt)}";
         }
         else
         {
@@ -169,11 +161,54 @@ public class ZoneDetailService
             measured = $"Đo lúc {TimeText(m.MeasuredAt)} · {AgeText(nowUtc - m.MeasuredAt)}";
         }
 
-        string statusText = $"{StatusDisplay.DataStatusIcon(ds)} {StatusDisplay.DataStatusText(ds)}";
-        if (isOldValue) statusText += " · hiển thị dữ liệu cũ";
+        // Ước tính từ khu vực lân cận:
+        //  - Cảm biến LỖI hoặc báo hỏng: luôn ước tính, cho tới khi cảm biến hoạt động lại.
+        //  - Cảm biến có dữ liệu CŨ: chỉ khi bật công tắc, cho tới khi cảm biến nhận giá trị mới.
+        bool isFaulty = m.IsError || sensorFault;
+        bool isEstimated = false;
+        string estimateStatus = "";
+        string estimateTooltip = "";
+
+        if (isFaulty || (isStale && estimateStale))
+        {
+            EstimateResult estimate = estimator.Estimate(zoneCode, type.Id, sensor.Unit);
+
+            if (estimate.Value is double estimated)
+            {
+                // Dữ liệu cũ: vẫn cho biết số đo thật cuối cùng
+                if (isStale && !m.IsError && m.Value is double lastReal)
+                {
+                    string lastText = lastReal.ToString("0.##", CultureInfo.CurrentCulture);
+                    measured = $"Số đo cuối {lastText}{(unit.Length > 0 ? " " + unit : "")} lúc " +
+                               $"{TimeText(m.MeasuredAt)} · {AgeText(nowUtc - m.MeasuredAt)}";
+                }
+
+                valueText = "≈ " + estimated.ToString("0.##", CultureInfo.CurrentCulture);
+                unitText = unit;
+                isEstimated = true;
+                estimateStatus = $" · ước tính từ {estimate.SourceZones.Count} khu vực";
+
+                string until = isFaulty
+                    ? "cho tới khi cảm biến hoạt động lại"
+                    : "cho tới khi cảm biến nhận giá trị mới";
+                estimateTooltip =
+                    $"Giá trị ước tính = trung bình cảm biến cùng loại ở {estimate.SourceZones.Count} khu vực " +
+                    $"lân cận ({string.Join(", ", estimate.SourceZones)}), không phải số đo thật. Hiển thị {until}.";
+            }
+            else
+            {
+                estimateStatus = " · không ước tính được (thiếu khu vực lân cận)";
+                estimateTooltip = estimate.Message ?? "";
+            }
+        }
+
+        string statusText = $"{StatusDisplay.DataStatusIcon(ds)} {StatusDisplay.DataStatusText(ds)}{estimateStatus}";
         if (sensorFault) statusText += " · cảm biến báo lỗi";
 
         if (m.IsError && !string.IsNullOrWhiteSpace(m.ErrorMessage)) footer += $" · {m.ErrorMessage}";
+
+        string tooltip = $"{type.Name} - khu vực {zoneCode}\n{measured}\n{statusText}\n{footer}";
+        if (estimateTooltip.Length > 0) tooltip += $"\n{estimateTooltip}";
 
         return new SensorTile
         {
@@ -186,8 +221,8 @@ public class ZoneDetailService
             DataStatus = ds,
             StatusText = statusText,
             FooterText = footer,
-            IsOldValue = isOldValue,
-            TooltipText = $"{type.Name} - khu vực {zoneCode}\n{measured}\n{statusText}\n{footer}"
+            IsEstimated = isEstimated,
+            TooltipText = tooltip
         };
     }
 

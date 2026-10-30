@@ -5,8 +5,9 @@ using System.Text.Json;
 namespace QuanLyTuoiTieu.Services;
 
 /// <summary>
-/// Cài đặt: chu kỳ lấy dữ liệu (tự chọn), ngưỡng dữ liệu cũ = chu kỳ + 1 giờ, và ngưỡng cảnh báo cụm
-/// cảm biến bị di chuyển. Lưu ra tệp nhỏ %LocalAppData%\QuanLyTuoiTieu\settings.json.
+/// Cài đặt: chu kỳ lấy dữ liệu (tự chọn), ngưỡng dữ liệu cũ = chu kỳ + 1 giờ, ngưỡng cảnh báo cụm cảm biến
+/// bị di chuyển, và công tắc ước tính cho cảm biến có dữ liệu cũ.
+/// Lưu ra tệp nhỏ %LocalAppData%\QuanLyTuoiTieu\settings.json.
 /// </summary>
 public static class SyncSettings
 {
@@ -32,6 +33,7 @@ public static class SyncSettings
         public double IntervalMinutes { get; set; }
         public bool UseHours { get; set; }
         public double MoveThresholdMeters { get; set; }
+        public bool EstimateStaleEnabled { get; set; }
     }
 
     // Tự nạp cài đặt đã lưu ngay lần đầu có ai dùng lớp này
@@ -52,6 +54,12 @@ public static class SyncSettings
     /// <summary>Ngưỡng cảnh báo di chuyển (mét).</summary>
     public static double MoveThresholdMeters { get; private set; } = DefaultMoveThresholdMeters;
 
+    /// <summary>
+    /// true = cảm biến có dữ liệu ĐÃ CŨ hiển thị giá trị ước tính từ khu vực lân cận (cho tới khi nhận giá trị mới).
+    /// Mặc định tắt. (Cảm biến LỖI luôn được ước tính, không phụ thuộc công tắc này.)
+    /// </summary>
+    public static bool EstimateStaleEnabled { get; private set; }
+
     /// <summary>Đặt chu kỳ mới (đã kiểm tra khoảng hợp lệ ở nơi gọi) và lưu.</summary>
     public static void SetInterval(TimeSpan interval)
     {
@@ -69,6 +77,12 @@ public static class SyncSettings
     public static void SetMoveThreshold(double meters)
     {
         MoveThresholdMeters = meters;
+        Save();
+    }
+
+    public static void SetEstimateStaleEnabled(bool enabled)
+    {
+        EstimateStaleEnabled = enabled;
         Save();
     }
 
@@ -92,6 +106,8 @@ public static class SyncSettings
             {
                 MoveThresholdMeters = data.MoveThresholdMeters;
             }
+
+            EstimateStaleEnabled = data.EstimateStaleEnabled;
         }
         catch (Exception ex)
         {
@@ -109,7 +125,8 @@ public static class SyncSettings
             {
                 IntervalMinutes = Interval.TotalMinutes,
                 UseHours = UseHours,
-                MoveThresholdMeters = MoveThresholdMeters
+                MoveThresholdMeters = MoveThresholdMeters,
+                EstimateStaleEnabled = EstimateStaleEnabled
             };
             File.WriteAllText(FilePath,
                 JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true }));

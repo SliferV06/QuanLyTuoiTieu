@@ -16,14 +16,14 @@ public class SensorTile
     /// <summary>true = thẻ sáng. false = thẻ mờ.</summary>
     public bool IsLit { get; init; }
 
-    /// <summary>Giá trị hiển thị: số đo, "—" (chưa có dữ liệu) hoặc "Lỗi".</summary>
+    /// <summary>Giá trị hiển thị: số đo, "≈ số" (ước tính), "—" (chưa có dữ liệu) hoặc "Lỗi".</summary>
     public string ValueText { get; init; } = "—";
     public string UnitText { get; init; } = "";
 
     /// <summary>Ví dụ: "Đo lúc 10:42:11 · 3 phút trước".</summary>
     public string MeasuredText { get; init; } = "";
 
-    /// <summary>Dùng để chọn màu viền và chữ trạng thái của thẻ sáng.</summary>
+    /// <summary>Dùng để chọn màu viền và chữ trạng thái của thẻ sáng (theo dữ liệu THẬT).</summary>
     public DataStatus DataStatus { get; init; }
 
     /// <summary>Thẻ sáng: trạng thái dữ liệu. Thẻ mờ: lý do chưa kết nối.</summary>
@@ -32,8 +32,8 @@ public class SensorTile
     /// <summary>Dòng nhỏ cuối thẻ: ESP32 phụ trách, lý do lỗi.</summary>
     public string FooterText { get; init; } = "";
 
-    /// <summary>true = đang hiển thị giá trị hợp lệ CUỐI CÙNG (dữ liệu cũ) vì bản ghi mới nhất bị lỗi.</summary>
-    public bool IsOldValue { get; init; }
+    /// <summary>true = giá trị hiển thị là ƯỚC TÍNH từ khu vực lân cận, không phải số đo thật.</summary>
+    public bool IsEstimated { get; init; }
 
     public string TooltipText { get; init; } = "";
 

@@ -35,6 +35,7 @@ public partial class ZoneDetailWindow : Window
             ? "Chế độ mô phỏng: nhấn thẻ mờ để kết nối thử, nhấn thẻ sáng để ngắt kết nối thử."
             : "";
         SimMoveButton.Visibility = IsSimulationMode ? Visibility.Visible : Visibility.Collapsed;
+        EstimateStaleCheck.IsChecked = SyncSettings.EstimateStaleEnabled;
 
         ShowThreshold();
         ReloadDetail();
@@ -250,7 +251,14 @@ public partial class ZoneDetailWindow : Window
         DataChanged = true;   // để cửa sổ chính cập nhật thống kê khi đóng
         ReloadDetail();
     }
+    private void EstimateStale_Changed(object sender, RoutedEventArgs e)
+    {
+        bool enabled = EstimateStaleCheck.IsChecked == true;
+        if (enabled == SyncSettings.EstimateStaleEnabled) return;   // chưa đổi (đang nạp trạng thái ban đầu)
 
+        SyncSettings.SetEstimateStaleEnabled(enabled);
+        ReloadDetail();   // chỉ đổi cách hiển thị thẻ, không đổi dữ liệu
+    }
     // ===== Đóng cửa sổ =====
 
     private void Close_Click(object sender, RoutedEventArgs e)

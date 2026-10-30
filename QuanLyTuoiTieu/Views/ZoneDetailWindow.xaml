@@ -154,9 +154,13 @@
 
         <!-- ===== 4. Tiêu đề danh sách cảm biến ===== -->
         <DockPanel Grid.Row="3" Margin="16,12,16,6">
+            <CheckBox x:Name="EstimateStaleCheck" DockPanel.Dock="Right" Content="Ước tính khi dữ liệu cũ"
+                      VerticalAlignment="Center"
+                      ToolTip="Bật: cảm biến có dữ liệu đã cũ hiển thị giá trị ước tính (trung bình cảm biến cùng loại ở khu vực lân cận, cần ít nhất 4 nguồn) cho tới khi nhận giá trị mới. Cảm biến lỗi luôn được ước tính, không phụ thuộc công tắc này."
+                      Checked="EstimateStale_Changed" Unchecked="EstimateStale_Changed"/>
             <TextBlock Text="DANH SÁCH CẢM BIẾN" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center"/>
             <TextBlock x:Name="HintText" Foreground="#92400E" FontSize="12" VerticalAlignment="Center"
-                       Margin="16,0,0,0" TextTrimming="CharacterEllipsis"/>
+                       Margin="16,0,16,0" TextTrimming="CharacterEllipsis"/>
         </DockPanel>
 
         <!-- ===== 5. Lưới thẻ cảm biến ===== -->
@@ -223,9 +227,9 @@
                                 <Setter TargetName="ValueBlock" Property="Foreground" Value="#6B7280"/>
                             </DataTrigger>
 
-                            <!-- Đang hiển thị giá trị CŨ (cảm biến lỗi): chữ xám nghiêng (đặt sau trigger Error) -->
-                            <DataTrigger Binding="{Binding IsOldValue}" Value="True">
-                                <Setter TargetName="ValueBlock" Property="Foreground" Value="#6B7280"/>
+                            <!-- Giá trị ƯỚC TÍNH: chữ cam nghiêng (đặt sau trigger Error để ghi đè màu đỏ) -->
+                            <DataTrigger Binding="{Binding IsEstimated}" Value="True">
+                                <Setter TargetName="ValueBlock" Property="Foreground" Value="{StaticResource WarningFg}"/>
                                 <Setter TargetName="ValueBlock" Property="FontStyle" Value="Italic"/>
                             </DataTrigger>
 
